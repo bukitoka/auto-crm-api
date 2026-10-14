@@ -1,0 +1,103 @@
+[project]
+name = "auto-crm-api"
+version = "0.1.0"
+description = "Backend API for Auto CRM, an AI-assisted CRM."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "aiosmtplib>=5.1.3",
+    "alembic>=1.20.0",
+    "asyncpg>=0.32.0",
+    "fastapi[standard]>=0.143.0",
+    "httpx>=0.28.1",
+    "minio>=7.2.20",
+    "onnxruntime>=1.31.0",
+    "openai>=3.29.0",
+    "pillow>=12.3.0",
+    "pwdlib[argon2]>=0.3.1",
+    "pydantic-settings>=2.15.0",
+    "pyjwt>=2.15.1",
+    "pypdf>=6.20.1",
+    "python-docx>=1.2.0",
+    "rapidocr>=3.10.0",
+    "sqlalchemy[asyncio]>=2.1.4",
+]
+
+[project.scripts]
+# Demo data for local development: `uv run seed` (add `--reset` to start over).
+seed = "app.seed:main"
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "app"
+
+[dependency-groups]
+dev = [
+    "faker>=40.43.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.0",
+    "ty>=0.0.86",
+]
+
+[tool.alembic]
+script_location = "%(here)s/migrations"
+file_template = "%%(year)d%%(month).2d%%(day).2d_%%(rev)s_%%(slug)s"
+
+[[tool.alembic.post_write_hooks]]
+name = "ruff_format"
+type = "module"
+module = "ruff"
+options = "format REVISION_SCRIPT_FILENAME"
+
+[[tool.alembic.post_write_hooks]]
+name = "ruff_fix"
+type = "module"
+module = "ruff"
+options = "check --fix REVISION_SCRIPT_FILENAME"
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.ty.environment]
+python-version = "3.14"
+
+[tool.ty.src]
+include = ["src", "tests", "migrations"]
+
+# Unit tests swap repositories and sessions for mocks; ty cannot see the mock attributes
+# (`repo.get.return_value`, `session.commit.assert_awaited_once()`), so skip that rule there.
+[[tool.ty.overrides]]
+include = ["tests/unit/**"]
+
+[tool.ty.overrides.rules]
+unresolved-attribute = "ignore"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+# Coverage for every run. For the quick DB-free loop use: uv run pytest tests/unit --no-cov
+# (`--cov-report` comes last so `--cov` never swallows a test path given on the command line.)
+addopts = "--cov --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["src/app"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 95
