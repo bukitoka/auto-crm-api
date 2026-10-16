@@ -6,7 +6,7 @@ from typing import Any
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.email import Mailer
+from app.core.email import BaseMailer
 from app.core.exceptions import AppError, NotFoundError, PermissionDeniedError
 from app.modules.ai.client import AIClient
 from app.modules.assistant import prompts
@@ -40,7 +40,7 @@ TITLE_LENGTH = 60
 
 
 class AssistantAgent:
-    def __init__(self, session: AsyncSession, ai: AIClient, mailer: Mailer) -> None:
+    def __init__(self, session: AsyncSession, ai: AIClient, mailer: BaseMailer) -> None:
         self.session = session
         self.ai = ai
         self.mailer = mailer
@@ -129,7 +129,7 @@ class ConversationService:
         return conversation
 
     async def start(
-        self, data: MessageCreate, *, user: User, ai: AIClient, mailer: Mailer
+        self, data: MessageCreate, *, user: User, ai: AIClient, mailer: BaseMailer
     ) -> ChatTurn:
         """Create a conversation from the first message and answer it."""
         title = _title_from(data.content or _file_names(data))
@@ -154,7 +154,7 @@ class ConversationService:
         *,
         user: User,
         ai: AIClient,
-        mailer: Mailer,
+        mailer: BaseMailer,
     ) -> ChatTurn:
         conversation = await self.get(conversation_id, user=user)
         if conversation.user_id != user.id:
@@ -169,7 +169,7 @@ class ConversationService:
         *,
         user: User,
         ai: AIClient,
-        mailer: Mailer,
+        mailer: BaseMailer,
     ) -> ChatTurn:
         previous = await self.repo.recent_messages(conversation_id, HISTORY_LIMIT - 1)
         attachments = _attachments(data)

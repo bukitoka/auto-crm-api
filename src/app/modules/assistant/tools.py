@@ -18,7 +18,7 @@ from typing import Any
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.email import Mailer
+from app.core.email import BaseMailer
 from app.core.exceptions import NotFoundError
 from app.modules.activities.models import Activity, ActivityType
 from app.modules.activities.schemas import ActivityCreate, ActivityFilters, ActivityRead
@@ -64,7 +64,7 @@ class ToolContext:
     session: AsyncSession
     user: User
     ai: AIClient
-    mailer: Mailer
+    mailer: BaseMailer
     actions: list[AssistantAction] = field(default_factory=list)
 
     def __post_init__(self) -> None:
