@@ -17,6 +17,7 @@ htmlcov/
 
 # Environment
 .env
+.env.prod
 
 # Editors / OS
 .idea/

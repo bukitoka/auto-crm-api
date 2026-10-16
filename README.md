@@ -9,7 +9,7 @@ You need [uv](https://docs.astral.sh/uv/) and Docker.
 
 ```bash
 cp .env.example .env
-docker compose up -d            # Postgres, MinIO (file storage) and Mailpit (test inbox)
+docker compose up -d            # Postgres and MinIO (file storage)
 uv sync
 uv run alembic upgrade head
 uv run seed                     # optional demo data
@@ -17,7 +17,7 @@ uv run fastapi dev src/app/main.py
 ```
 
 The API is at http://localhost:8000 and its interactive docs at http://localhost:8000/docs.
-Emails sent in development show up in Mailpit at http://localhost:8026.
+Emails go out through Brevo, so set `BREVO_API_KEY` and a verified `MAIL_FROM_EMAIL` to send them.
 
 The AI features need `DEEPSEEK_API_KEY` in `.env`; without it they answer `503` and everything
 else still works. If port 5432 is taken on your machine, set `POSTGRES_PORT` (for example `5433`)
@@ -74,3 +74,9 @@ Both ask for the password, or read `SUPERADMIN_PASSWORD` when not run in a termi
 Requests are authenticated with a JWT from `POST /auth/login`, or with the `X-API-Key` header for
 n8n, which then acts as the `automation@auto-crm.local` service account. That account is unscoped
 (it reads and writes every record), can't log in, and is hidden from the user list.
+
+## Production
+Deployed by `.github/workflows/deploy.yml` to a Docker host behind Caddy (automatic HTTPS), with Neon
+Postgres, Neon object storage and Brevo email (SDK). Copy `.env.production.example`
+to `~/apps/auto-crm-api/.env` on the server. With `ENVIRONMENT=production` the API refuses to start on
+weak secrets, and disables `/docs`. The `/api/v1/emails/notify` endpoint lets n8n send mail through the same backend.

@@ -1,0 +1,54 @@
+# Runs on the Lighthouse server from ~/apps/auto-crm-api, next to a .env file with the
+# production settings (see .env.example). Only Caddy is public; the API stays on the
+# Docker network where n8n reaches it as http://auto-crm-api:8000.
+services:
+  api:
+    image: ghcr.io/bukitoka/auto-crm-api:${IMAGE_TAG:-latest}
+    container_name: auto-crm-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - model_cache:/home/app/.cache
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - auto-crm-net
+
+  caddy:
+    image: caddy:2
+    container_name: auto-crm-caddy
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?Set API_DOMAIN in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    security_opt:
+      - no-new-privileges:true
+    logging: *logging
+    networks:
+      - auto-crm-net
+
+volumes:
+  model_cache:
+  caddy_data:
+  caddy_config:
+
+networks:
+  auto-crm-net:
+    name: auto-crm-net
+    external: true

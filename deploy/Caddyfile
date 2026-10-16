@@ -1,0 +1,11 @@
+# API_DOMAIN is a domain (automatic HTTPS) or ":80" for plain HTTP on the server IP.
+{$API_DOMAIN} {
+	encode zstd gzip
+
+	# Uploads are capped at 5 MB each, three per assistant message.
+	request_body {
+		max_size 20MB
+	}
+
+	reverse_proxy api:8000
+}
