@@ -1,5 +1,6 @@
 """AI: the OpenAI-compatible client (mocked SDK), the dependency and the prompt building."""
 
+import asyncio
 import json
 from datetime import date
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ from pydantic import BaseModel
 
 from app.core.config import settings
 from app.core.exceptions import AIResponseError, NotFoundError, ServiceUnavailableError
+from app.modules.ai import client as ai_client
 from app.modules.ai import dependencies, prompts
 from app.modules.ai.client import AIClient
 from app.modules.ai.schemas import (
@@ -53,6 +55,8 @@ async def test_complete_json_returns_the_validated_object() -> None:
     call = client._client.chat.completions.create.call_args.kwargs
     assert call["model"] == "test-model"
     assert call["response_format"] == {"type": "json_object"}
+    assert call["extra_body"] == {"thinking": {"type": "disabled"}}  # thinking takes minutes
+    assert call["max_tokens"] > 0
     assert call["messages"] == [
         {"role": "system", "content": "sys"},
         {"role": "user", "content": "usr"},
@@ -96,6 +100,7 @@ async def test_chat_sends_tools_and_returns_the_message() -> None:
     call = client._client.chat.completions.create.call_args.kwargs
     assert call["tools"] == tools
     assert call["messages"] == [{"role": "user", "content": "Hi"}]
+    assert call["extra_body"] == {"thinking": {"type": "disabled"}}
 
 
 async def test_chat_maps_provider_errors_to_502() -> None:
@@ -106,6 +111,19 @@ async def test_chat_maps_provider_errors_to_502() -> None:
 
     with pytest.raises(AIResponseError, match="request failed"):
         await client.chat(messages=[], tools=[])
+
+
+async def test_a_stuck_provider_call_times_out_with_502(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ai_client, "REQUEST_DEADLINE_SECONDS", 0.01)
+    client = _client_returning(None)
+
+    async def never_answers(**_: Any) -> None:
+        await asyncio.sleep(1)
+
+    client._client.chat.completions.create.side_effect = never_answers
+
+    with pytest.raises(AIResponseError, match="took too long"):
+        await client.complete_json(system="s", user="u", schema=LeadScore)
 
 
 # --- get_ai_client ---

@@ -38,6 +38,7 @@ class TaskFilters(BaseModel):
     contact_id: uuid.UUID | None = None
     deal_id: uuid.UUID | None = None
     overdue: bool | None = None  # true: due before today and not done
+    open: bool | None = None  # true: not done; false: done
 
 
 class TaskRead(ORMModel):

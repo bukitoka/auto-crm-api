@@ -445,9 +445,9 @@ async def test_every_tool_runs_against_the_api(
     assert all("error" not in result for result in reads), reads
     assert reads[0]["companies"][0]["name"] == "Globex"
     assert reads[1]["deals"][0]["title"] == "Globex pilot"
-    assert reads[2]["tasks"][0]["title"] == "Call Sam"
+    assert reads[2]["open_tasks"]["items"][0]["title"] == "Call Sam"
     assert reads[3]["deal"]["contact_id"] == contact_id
-    assert reads[4]["contacts"][0]["name"] == "Sam"
+    assert reads[4]["contacts"]["items"][0]["name"] == "Sam"
     assert [t["title"] for t in reads[5]["tasks"]] == ["Call Sam"]
     assert reads[6]["stages"][0] == "Qualification"
     assert {u["name"] for u in reads[7]["users"]} == {"Ada Admin", "Max Member"}
@@ -562,3 +562,48 @@ async def test_smart_capture_from_a_file(
         headers=admin_headers,
     )
     assert unsupported.status_code == 400
+
+
+async def test_task_questions_see_the_whole_team_like_the_dashboard(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    member_headers: dict[str, str],
+    ai: ScriptedAI,
+) -> None:
+    member_id = (await client.get("/api/v1/auth/me", headers=member_headers)).json()["id"]
+    for title in ("Late one", "Late two"):
+        await client.post(
+            "/api/v1/tasks",
+            json={"title": title, "due_date": "2020-01-01", "assignee_id": member_id},
+            headers=admin_headers,
+        )
+    done = (
+        await client.post(
+            "/api/v1/tasks",
+            json={"title": "Finished", "status": "done", "assignee_id": member_id},
+            headers=admin_headers,
+        )
+    ).json()
+    ai.script = [
+        calls(
+            ("list_tasks", {"overdue_only": True}),
+            ("list_tasks", {"assignee": "me"}),
+            ("list_tasks", {"assignee": member_id, "include_done": True}),
+            ("list_tasks", {"assignee": "nobody"}),
+            ("get_dashboard_summary", {}),
+        ),
+        says("Two overdue tasks."),
+    ]
+
+    response = await client.post(URL, json=message("Any overdue tasks?"), headers=admin_headers)
+
+    assert response.status_code == 201, response.text
+    team, mine, member, unknown, dashboard = ai.tool_results(1)
+    assert team["total"] == 2
+    assert {t["title"] for t in team["tasks"]} == {"Late one", "Late two"}
+    assert mine == {"assignee": "me", "total": 0, "tasks": []}
+    assert done["title"] in {t["title"] for t in member["tasks"]}
+    assert member["total"] == 3
+    assert "error" in unknown
+    assert dashboard["overdue_tasks_all_users"] == 2
+    assert len(dashboard["overdue_task_list"]) == 2

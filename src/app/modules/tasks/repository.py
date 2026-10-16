@@ -52,6 +52,10 @@ class TaskRepository:
             query = query.where(Task.contact_id == filters.contact_id)
         if filters.deal_id:
             query = query.where(Task.deal_id == filters.deal_id)
+        if filters.open is True:
+            query = query.where(Task.status != TaskStatus.DONE)
+        elif filters.open is False:
+            query = query.where(Task.status == TaskStatus.DONE)
         if filters.overdue is True:
             query = query.where(_is_overdue())
         elif filters.overdue is False:

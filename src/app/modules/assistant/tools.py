@@ -52,7 +52,7 @@ from app.modules.users.service import SERVICE_ACCOUNT_EMAIL, UserService
 from app.modules.webhooks.service import WebhookService
 from app.shared.pagination import PageParams
 
-RESULT_LIMIT = 8
+RESULT_LIMIT = 25
 
 
 @dataclass
@@ -172,6 +172,14 @@ def _page(size: int = RESULT_LIMIT) -> PageParams:
     return PageParams(page=1, size=size)
 
 
+def _listing(key: str, page: Any, view: Callable[[Any], dict[str, Any]]) -> dict[str, Any]:
+    """A list result with its real total, so the model never mistakes a partial list for all."""
+    result = {"total": page.total, key: [view(item) for item in page.items]}
+    if page.total > len(page.items):
+        result["note"] = f"Showing {len(page.items)} of {page.total}; narrow the filters for more."
+    return result
+
+
 def _link_for(contact_id: uuid.UUID | None, deal_id: uuid.UUID | None) -> dict[str, Any]:
     """Tasks and activities have no page of their own: link to their contact or deal."""
     if contact_id:
@@ -184,23 +192,46 @@ def _link_for(contact_id: uuid.UUID | None, deal_id: uuid.UUID | None) -> dict[s
 # --- Read tools ---
 
 
-class SearchParams(BaseModel):
-    query: str = Field(description="Name, email, title or other keywords")
+class SearchContactsParams(BaseModel):
+    query: str | None = Field(default=None, description="Name, email or phone; omit to list all")
+    status: ContactStatus | None = None
+    company_id: uuid.UUID | None = None
+    owner_id: uuid.UUID | None = Field(default=None, description="A teammate from list_users")
 
 
-async def search_contacts(ctx: ToolContext, params: SearchParams) -> dict[str, Any]:
-    page = await ctx.contacts.list_page(ContactFilters(search=params.query), _page())
-    return {"total": page.total, "contacts": [_contact_view(c) for c in page.items]}
+async def search_contacts(ctx: ToolContext, params: SearchContactsParams) -> dict[str, Any]:
+    filters = ContactFilters(search=params.query, **params.model_dump(exclude={"query"}))
+    page = await ctx.contacts.list_page(filters, _page())
+    return _listing("contacts", page, _contact_view)
 
 
-async def search_companies(ctx: ToolContext, params: SearchParams) -> dict[str, Any]:
-    page = await ctx.companies.list_page(CompanyFilters(search=params.query), _page())
-    return {"total": page.total, "companies": [_company_view(c) for c in page.items]}
+class SearchCompaniesParams(BaseModel):
+    query: str | None = Field(default=None, description="Company name; omit to list all")
+    industry: str | None = None
 
 
-async def search_deals(ctx: ToolContext, params: SearchParams) -> dict[str, Any]:
-    page = await ctx.deals.list_page(DealFilters(search=params.query), _page())
-    return {"total": page.total, "deals": [_deal_view(d) for d in page.items]}
+async def search_companies(ctx: ToolContext, params: SearchCompaniesParams) -> dict[str, Any]:
+    filters = CompanyFilters(search=params.query, industry=params.industry)
+    page = await ctx.companies.list_page(filters, _page())
+    return _listing("companies", page, _company_view)
+
+
+class SearchDealsParams(BaseModel):
+    query: str | None = Field(default=None, description="Words in the title; omit to list all")
+    stage_name: str | None = Field(default=None, description="Only deals in this stage")
+    contact_id: uuid.UUID | None = None
+    company_id: uuid.UUID | None = None
+    owner_id: uuid.UUID | None = Field(default=None, description="A teammate from list_users")
+
+
+async def search_deals(ctx: ToolContext, params: SearchDealsParams) -> dict[str, Any]:
+    filters = DealFilters(
+        search=params.query,
+        stage_id=await _stage_id(ctx, params.stage_name) if params.stage_name else None,
+        **params.model_dump(exclude={"query", "stage_name"}),
+    )
+    page = await ctx.deals.list_page(filters, _page())
+    return _listing("deals", page, _deal_view)
 
 
 class ContactIdParams(BaseModel):
@@ -210,13 +241,13 @@ class ContactIdParams(BaseModel):
 async def get_contact(ctx: ToolContext, params: ContactIdParams) -> dict[str, Any]:
     contact = await ctx.contacts.get(params.contact_id)
     deals = await ctx.deals.list_page(DealFilters(contact_id=contact.id), _page())
-    tasks = await ctx.tasks.list_page(TaskFilters(contact_id=contact.id), _page())
+    tasks = await ctx.tasks.list_page(TaskFilters(contact_id=contact.id, open=True), _page())
     activities = await ctx.activities.list_page(ActivityFilters(contact_id=contact.id), _page(5))
     return {
         "contact": _contact_view(contact) | {"ai_summary": contact.ai_summary},
-        "deals": [_deal_view(d) for d in deals.items],
-        "tasks": [_task_view(t) for t in tasks.items],
-        "recent_activities": [_activity_view(a) for a in activities.items],
+        "deals": _listing("items", deals, _deal_view),
+        "open_tasks": _listing("items", tasks, _task_view),
+        "recent_activities": _listing("items", activities, _activity_view),
     }
 
 
@@ -226,12 +257,12 @@ class DealIdParams(BaseModel):
 
 async def get_deal(ctx: ToolContext, params: DealIdParams) -> dict[str, Any]:
     deal = await ctx.deals.get(params.deal_id)
-    tasks = await ctx.tasks.list_page(TaskFilters(deal_id=deal.id), _page())
+    tasks = await ctx.tasks.list_page(TaskFilters(deal_id=deal.id, open=True), _page())
     activities = await ctx.activities.list_page(ActivityFilters(deal_id=deal.id), _page(5))
     return {
         "deal": _deal_view(deal) | {"contact_id": deal.contact_id, "company_id": deal.company_id},
-        "tasks": [_task_view(t) for t in tasks.items],
-        "recent_activities": [_activity_view(a) for a in activities.items],
+        "open_tasks": _listing("items", tasks, _task_view),
+        "recent_activities": _listing("items", activities, _activity_view),
     }
 
 
@@ -245,14 +276,18 @@ async def get_company(ctx: ToolContext, params: CompanyIdParams) -> dict[str, An
     deals = await ctx.deals.list_page(DealFilters(company_id=company.id), _page())
     return {
         "company": _company_view(company) | {"website": company.website, "notes": company.notes},
-        "contacts": [_contact_view(c) for c in contacts.items],
-        "deals": [_deal_view(d) for d in deals.items],
+        "contacts": _listing("items", contacts, _contact_view),
+        "deals": _listing("items", deals, _deal_view),
     }
 
 
 class ListTasksParams(BaseModel):
     search: str | None = Field(default=None, description="Words in the task title")
-    only_mine: bool = Field(default=True, description="Only tasks assigned to the current user")
+    assignee: str = Field(
+        default="all",
+        description='"all" (whole team, like the dashboard), "me" (the current user) '
+        "or a teammate's user id from list_users",
+    )
     overdue_only: bool = False
     include_done: bool = False
     contact_id: uuid.UUID | None = None
@@ -260,16 +295,26 @@ class ListTasksParams(BaseModel):
 
 
 async def list_tasks(ctx: ToolContext, params: ListTasksParams) -> dict[str, Any]:
+    scope = params.assignee.strip().lower()
+    if scope == "all":
+        assignee_id = None
+    elif scope == "me":
+        assignee_id = ctx.user.id
+    else:
+        try:
+            assignee_id = uuid.UUID(scope)
+        except ValueError:
+            raise NotFoundError('Unknown assignee. Use "all", "me" or a user id') from None
     filters = TaskFilters(
         search=params.search,
-        assignee_id=ctx.user.id if params.only_mine else None,
+        assignee_id=assignee_id,
         overdue=True if params.overdue_only else None,
+        open=None if params.include_done else True,
         contact_id=params.contact_id,
         deal_id=params.deal_id,
     )
-    page = await ctx.tasks.list_page(filters, _page(20))
-    tasks = [t for t in page.items if params.include_done or t.status != TaskStatus.DONE]
-    return {"tasks": [_task_view(t) for t in tasks]}
+    page = await ctx.tasks.list_page(filters, _page())
+    return {"assignee": scope} | _listing("tasks", page, _task_view)
 
 
 class NoParams(BaseModel):
@@ -508,16 +553,19 @@ async def list_users(ctx: ToolContext, _: NoParams) -> dict[str, Any]:
 
 async def get_dashboard_summary(ctx: ToolContext, _: NoParams) -> dict[str, Any]:
     summary = await ctx.dashboard.summary(ctx.user)
+    overdue = await ctx.tasks.list_page(TaskFilters(overdue=True), _page())
     return {
         "open_pipeline_value": summary.open_pipeline_value,
         "won_this_month_value": summary.won_this_month_value,
         "new_leads_this_month": summary.new_leads_this_month,
         "overdue_tasks_all_users": summary.overdue_tasks,
+        "overdue_task_list": [_task_view(t) for t in overdue.items],
         "pipeline_by_stage": [
             {"stage": s.stage_name, "deals": s.deal_count, "value": s.total_value}
             for s in summary.pipeline_by_stage
         ],
-        "my_open_tasks": [_task_view(t) for t in summary.my_tasks],
+        "my_open_tasks_soonest_10": [_task_view(t) for t in summary.my_tasks],
+        "recent_activities": [_activity_view(a) for a in summary.recent_activities],
     }
 
 
@@ -529,8 +577,8 @@ class ActivityListParams(BaseModel):
 
 
 async def list_activities(ctx: ToolContext, params: ActivityListParams) -> dict[str, Any]:
-    page = await ctx.activities.list_page(ActivityFilters(**params.model_dump()), _page(10))
-    return {"activities": [_activity_view(a) for a in page.items]}
+    page = await ctx.activities.list_page(ActivityFilters(**params.model_dump()), _page())
+    return _listing("activities", page, _activity_view)
 
 
 async def list_automations(ctx: ToolContext, _: NoParams) -> dict[str, Any]:
@@ -656,19 +704,32 @@ async def send_email(ctx: ToolContext, params: SendEmailParams) -> dict[str, Any
 
 _TOOL_LIST = [
     Tool(
-        "search_contacts", "Find contacts by name, email or phone.", SearchParams, search_contacts
+        "search_contacts",
+        "Find or list contacts by name/email/phone, status, company or owner.",
+        SearchContactsParams,
+        search_contacts,
     ),
-    Tool("search_companies", "Find companies by name.", SearchParams, search_companies),
-    Tool("search_deals", "Find deals by title.", SearchParams, search_deals),
+    Tool(
+        "search_companies",
+        "Find or list companies by name or industry.",
+        SearchCompaniesParams,
+        search_companies,
+    ),
+    Tool(
+        "search_deals",
+        "Find or list deals by title, stage, contact, company or owner.",
+        SearchDealsParams,
+        search_deals,
+    ),
     Tool(
         "get_contact",
-        "A contact's details with their deals, tasks and recent activities.",
+        "A contact's details with their deals, open tasks and recent activities.",
         ContactIdParams,
         get_contact,
     ),
     Tool(
         "get_deal",
-        "A deal's details with its tasks and recent activities.",
+        "A deal's details with its open tasks and recent activities.",
         DealIdParams,
         get_deal,
     ),
@@ -680,7 +741,8 @@ _TOOL_LIST = [
     ),
     Tool(
         "list_tasks",
-        "List open tasks (mine by default), optionally overdue only.",
+        "List open tasks for the whole team (default), the current user or a teammate; "
+        "optionally overdue only or including done tasks.",
         ListTasksParams,
         list_tasks,
     ),
@@ -698,7 +760,8 @@ _TOOL_LIST = [
     ),
     Tool(
         "get_dashboard_summary",
-        "Pipeline value, won this month, new leads, overdue tasks, deals per stage, my tasks.",
+        "Same numbers as the dashboard: pipeline value, won this month, new leads, overdue "
+        "tasks (whole team, with the list), deals per stage, my tasks, recent activities.",
         NoParams,
         get_dashboard_summary,
     ),
