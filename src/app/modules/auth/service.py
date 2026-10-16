@@ -2,7 +2,7 @@ import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.email import Mailer, get_mailer
+from app.core.email import BaseMailer, get_mailer
 from app.core.exceptions import AppError, AuthenticationError, BadRequestError
 from app.core.security import (
     create_access_token,
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 class AuthService:
-    def __init__(self, session: AsyncSession, mailer: Mailer | None = None) -> None:
+    def __init__(self, session: AsyncSession, mailer: BaseMailer | None = None) -> None:
         self.session = session
         self.users = UserService(session)
         self.user_repo = UserRepository(session)

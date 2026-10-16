@@ -58,12 +58,12 @@ class PayloadTooLargeError(AppError):
 
 class StorageError(AppError):
     status_code = status.HTTP_502_BAD_GATEWAY
-    default_message = "File storage is not reachable. Is MinIO running?"
+    default_message = "File storage is not reachable"
 
 
 class EmailDeliveryError(AppError):
     status_code = status.HTTP_502_BAD_GATEWAY
-    default_message = "The email could not be sent. Is the mail server (Mailpit) running?"
+    default_message = "The email could not be sent"
 
 
 class ServiceUnavailableError(AppError):

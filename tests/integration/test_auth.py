@@ -1,6 +1,7 @@
 import pytest
 from httpx import AsyncClient
 
+from app.core.config import settings
 from tests.integration.conftest import PASSWORD, create_admin_and_login
 
 USERS = "/api/v1/users"
@@ -181,3 +182,16 @@ async def test_app_lifespan_starts_and_stops_cleanly() -> None:
 
     async with app.router.lifespan_context(app):
         pass
+
+
+async def test_login_is_rate_limited(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "login_attempts_per_minute", 3)
+    body = {"email": "nobody@example.com", "password": "wrong-password"}
+    codes = [(await client.post("/api/v1/auth/login", json=body)).status_code for _ in range(4)]
+    assert codes == [401, 401, 401, 429]
+
+
+async def test_responses_carry_security_headers(client: AsyncClient) -> None:
+    response = await client.get("/health")
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
