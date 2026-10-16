@@ -21,7 +21,7 @@ target_metadata = Base.metadata
 
 def get_url() -> str:
     # Tests point this at the test database through the DATABASE_URL env var.
-    return get_settings().database_url
+    return get_settings().migration_database_url
 
 
 def run_migrations_offline() -> None:
