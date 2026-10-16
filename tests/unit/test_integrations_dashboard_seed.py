@@ -1,5 +1,3 @@
-"""Lead intake, the dashboard summary, the pipeline service and the seeder's safety checks."""
-
 import uuid
 from decimal import Decimal
 from types import SimpleNamespace
@@ -18,6 +16,7 @@ from tests.unit.conftest import (
     make_activity,
     make_company,
     make_contact,
+    make_deal,
     make_stage,
     make_task,
     make_user,
@@ -124,11 +123,24 @@ async def test_dashboard_summary_combines_the_repository_numbers(session: AsyncM
     service = DashboardService(session)
     mock_repos(service, "repo", "activities", "tasks")
     service.repo.open_pipeline_value.return_value = Decimal("1500.50")
-    service.repo.won_value_since.return_value = Decimal("40")
+    service.repo.closed_deals_since.side_effect = [
+        SimpleNamespace(won_count=1, lost_count=2, won_value=Decimal("40")),  # this month
+        SimpleNamespace(won_count=3, lost_count=1, won_value=Decimal("300")),  # last 90 days
+    ]
     service.repo.contacts_created_since.return_value = 3
     service.repo.pipeline_by_stage.return_value = [
         SimpleNamespace(
             stage_id=stage.id, stage_name="Proposal", deal_count=2, total_value=Decimal("99.5")
+        )
+    ]
+    service.repo.contacts_by_status.return_value = {"lead": 5}
+    service.repo.activities_by_type_since.return_value = {"call": 2}
+    service.repo.open_tasks_due_between.side_effect = [1, 4]
+    service.repo.overdue_tasks.return_value = [make_task(title="Late")]
+    service.repo.open_deals_closing_between.return_value = [make_deal(title="Soon")]
+    service.repo.leaderboard.return_value = [
+        SimpleNamespace(
+            User=user, open_deals_value=Decimal(10), won_this_month_value=Decimal(0), open_tasks=2
         )
     ]
     service.activities.list_recent.return_value = [make_activity()]
@@ -139,31 +151,74 @@ async def test_dashboard_summary_combines_the_repository_numbers(session: AsyncM
 
     assert summary.open_pipeline_value == 1500.5
     assert summary.won_this_month_value == 40.0
+    assert (summary.deals_won_this_month, summary.deals_lost_this_month) == (1, 2)
+    assert summary.win_rate == 0.75
+    assert summary.average_deal_size == 100.0
     assert summary.new_leads_this_month == 3
     assert summary.overdue_tasks == 4
+    assert (summary.tasks_due_today, summary.tasks_due_this_week) == (1, 4)
     assert summary.pipeline_by_stage[0].model_dump() == {
         "stage_id": stage.id,
         "stage_name": "Proposal",
         "deal_count": 2,
         "total_value": 99.5,
     }
+    assert [(c.status, c.count) for c in summary.contacts_by_status] == [
+        ("lead", 5),
+        ("prospect", 0),
+        ("customer", 0),
+        ("churned", 0),
+    ]
+    assert {str(a.type): a.count for a in summary.activities_last_30_days}["call"] == 2
+    assert [task.title for task in summary.overdue_task_list] == ["Late"]
+    assert [deal.title for deal in summary.deals_closing_soon] == ["Soon"]
+    assert summary.team[0].user.id == user.id
+    assert summary.team[0].open_tasks == 2
     assert [task.title for task in summary.my_tasks] == ["Mine"]
     assert len(summary.recent_activities) == 1
     service.tasks.list_open_for_assignee.assert_awaited_once_with(user.id, limit=RECENT_LIMIT)
-    month_start = service.repo.won_value_since.call_args.args[0]
+    month_start = service.repo.closed_deals_since.call_args_list[0].args[0]
     assert (month_start.day, month_start.hour, month_start.minute) == (1, 0, 0)
+
+
+async def test_dashboard_rates_are_null_without_closed_deals(session: AsyncMock) -> None:
+    service = DashboardService(session)
+    mock_repos(service, "repo", "activities", "tasks")
+    service.repo.open_pipeline_value.return_value = Decimal(0)
+    service.repo.closed_deals_since.return_value = SimpleNamespace(
+        won_count=0, lost_count=0, won_value=Decimal(0)
+    )
+    for name in ("pipeline_by_stage", "overdue_tasks", "open_deals_closing_between", "leaderboard"):
+        getattr(service.repo, name).return_value = []
+    service.repo.contacts_by_status.return_value = {}
+    service.repo.activities_by_type_since.return_value = {}
+    service.repo.contacts_created_since.return_value = 0
+    service.repo.open_tasks_due_between.return_value = 0
+    service.activities.list_recent.return_value = []
+    service.tasks.list_open_for_assignee.return_value = []
+    service.tasks.count_overdue.return_value = 0
+
+    summary = await service.summary(make_user())
+
+    assert (summary.win_rate, summary.average_deal_size) == (None, None)
 
 
 # --- PipelineService ---
 
 
-async def test_pipeline_lists_stages_from_the_repository(session: AsyncMock) -> None:
+async def test_pipeline_lists_stages_with_deal_counts(session: AsyncMock) -> None:
     service = PipelineService(session)
     mock_repos(service, "repo")
     stages = [make_stage("Qualification"), make_stage("Won")]
     service.repo.list_stages.return_value = stages
+    service.repo.deal_counts.return_value = {stages[0].id: 3}
 
-    assert await service.list_stages() == stages
+    result = await service.list_stages()
+
+    assert [(stage.name, stage.deal_count) for stage in result] == [
+        ("Qualification", 3),
+        ("Won", 0),
+    ]
 
 
 # --- Seeder safety ---

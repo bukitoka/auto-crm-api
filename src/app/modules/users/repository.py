@@ -18,17 +18,13 @@ class UserRepository:
         result = await self.session.execute(select(User).where(User.email == email.lower()))
         return result.scalar_one_or_none()
 
-    async def count_excluding(self, email: str) -> int:
-        """Count users, ignoring one email (used to skip the service account)."""
-        result = await self.session.execute(
-            select(func.count()).select_from(User).where(User.email != email)
-        )
-        return result.scalar_one()
+    async def super_admin_exists(self) -> bool:
+        return bool(await self.session.scalar(select(User.id).where(User.is_super_admin).limit(1)))
 
     async def list_page(
         self, *, search: str | None, offset: int, limit: int
     ) -> tuple[list[User], int]:
-        query = select(User)
+        query = select(User).where(User.is_super_admin.is_(False))
         if search:
             pattern = like_pattern(search)
             query = query.where(or_(User.full_name.ilike(pattern), User.email.ilike(pattern)))

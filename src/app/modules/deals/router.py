@@ -1,7 +1,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Query, Response, status
 
 from app.modules.auth.dependencies import CurrentUser
 from app.modules.deals.dependencies import DealServiceDep
@@ -12,6 +12,7 @@ from app.modules.deals.schemas import (
     DealStageUpdate,
     DealUpdate,
 )
+from app.shared.csv_files import csv_response
 from app.shared.pagination import Page, PageParamsDep
 
 router = APIRouter(prefix="/deals", tags=["deals"])
@@ -25,6 +26,14 @@ async def list_deals(
     filters: Annotated[DealFilters, Query()],
 ):
     return await service.list_page(filters, params)
+
+
+@router.get("/export", response_class=Response)
+async def export_deals(
+    service: DealServiceDep, _: CurrentUser, filters: Annotated[DealFilters, Query()]
+):
+    """All deals matching the list filters and sort, as CSV."""
+    return csv_response(await service.export_csv(filters), "deals.csv")
 
 
 @router.post("", response_model=DealRead, status_code=status.HTTP_201_CREATED)

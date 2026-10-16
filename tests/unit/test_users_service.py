@@ -2,7 +2,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
+from app.core.exceptions import (
+    BadRequestError,
+    ConflictError,
+    NotFoundError,
+    PermissionDeniedError,
+)
 from app.core.security import verify_password
 from app.modules.users.models import UserRole
 from app.modules.users.schemas import UserUpdate
@@ -16,30 +21,54 @@ def service(session: AsyncMock) -> UserService:
     service = UserService(session)
     mock_repos(service, "repo")
     service.repo.get_by_email.return_value = None
+    service.repo.super_admin_exists.return_value = True
     return service
 
 
-async def test_first_user_becomes_admin(service: UserService) -> None:
-    service.repo.count_excluding.return_value = 0
+async def test_sign_ups_become_members(service: UserService) -> None:
+    user = await service.create(email="next@example.com", password="pw123456", full_name="Next")
 
-    user = await service.create(email="first@example.com", password="pw123456", full_name="First")
-
-    assert user.role == UserRole.ADMIN
-    service.repo.count_excluding.assert_awaited_once_with(SERVICE_ACCOUNT_EMAIL)
+    assert (user.role, user.is_super_admin) == (UserRole.MEMBER, False)
     service.session.commit.assert_awaited_once()
 
 
-async def test_later_users_become_members(service: UserService) -> None:
-    service.repo.count_excluding.return_value = 1
+async def test_sign_ups_need_a_set_up_workspace(service: UserService) -> None:
+    service.repo.super_admin_exists.return_value = False
 
-    user = await service.create(email="next@example.com", password="pw123456", full_name="Next")
+    with pytest.raises(PermissionDeniedError, match="Finish setting up"):
+        await service.create(email="a@example.com", password="pw123456", full_name="A")
+    service.session.commit.assert_not_awaited()
 
-    assert user.role == UserRole.MEMBER
+
+async def test_setup_creates_the_super_admin_once(service: UserService) -> None:
+    service.repo.super_admin_exists.return_value = False
+    user = await service.setup(email="Root@Example.com", password="pw123456", full_name="Root")
+    assert (user.email, user.is_super_admin, user.is_admin) == ("root@example.com", True, True)
+
+    service.repo.super_admin_exists.return_value = True
+    with pytest.raises(ConflictError, match="already set up"):
+        await service.setup(email="two@example.com", password="pw123456", full_name="Two")
+
+
+async def test_set_password(service: UserService) -> None:
+    user = make_user()
+    service.repo.get_by_email.return_value = user
+
+    await service.set_password(user.email, "new-password")
+
+    assert verify_password("new-password", user.hashed_password)
+    service.session.commit.assert_awaited_once()
+
+
+@pytest.mark.parametrize("email", ["nobody@example.com", SERVICE_ACCOUNT_EMAIL])
+async def test_set_password_unknown_or_service_account(service: UserService, email: str) -> None:
+    service.repo.get_by_email.return_value = make_user(email=email) if "auto" in email else None
+
+    with pytest.raises(NotFoundError, match="User not found"):
+        await service.set_password(email, "new-password")
 
 
 async def test_create_lowercases_email_and_hashes_password(service: UserService) -> None:
-    service.repo.count_excluding.return_value = 1
-
     user = await service.create(email="Mixed@Example.COM", password="pw123456", full_name="M")
 
     assert user.email == "mixed@example.com"
@@ -77,7 +106,7 @@ async def test_admin_cannot_demote_or_deactivate_self(service: UserService, chan
     admin = make_user(role=UserRole.ADMIN)
     service.repo.get.return_value = admin
 
-    with pytest.raises(BadRequestError, match="cannot demote or deactivate yourself"):
+    with pytest.raises(BadRequestError, match="cannot change your own role or deactivate"):
         await service.update(admin.id, UserUpdate(**changes), acting_user=admin)
     assert admin.role == UserRole.ADMIN
     assert admin.is_active is True
@@ -92,8 +121,8 @@ async def test_admin_can_rename_self(service: UserService) -> None:
     assert updated.full_name == "New Name"
 
 
-async def test_admin_can_promote_another_user(service: UserService) -> None:
-    admin = make_user(role=UserRole.ADMIN)
+async def test_super_admin_can_promote_a_member(service: UserService) -> None:
+    admin = make_user(role=UserRole.ADMIN, is_super_admin=True)
     member = make_user(role=UserRole.MEMBER)
     service.repo.get.return_value = member
 
@@ -101,6 +130,70 @@ async def test_admin_can_promote_another_user(service: UserService) -> None:
 
     assert updated.role == UserRole.ADMIN
     service.session.commit.assert_awaited_once()
+
+
+async def test_admins_cannot_make_admins(service: UserService) -> None:
+    member = make_user(role=UserRole.MEMBER)
+    service.repo.get.return_value = member
+
+    with pytest.raises(PermissionDeniedError, match="Only the super admin"):
+        await service.update(
+            member.id, UserUpdate(role=UserRole.ADMIN), acting_user=make_user(role=UserRole.ADMIN)
+        )
+    assert member.role == UserRole.MEMBER
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [{"role": UserRole.MEMBER}, {"is_active": False}, {"full_name": "X"}],
+    ids=["demote", "deactivate", "rename"],
+)
+async def test_admins_cannot_change_other_admins(service: UserService, changes: dict) -> None:
+    other = make_user(role=UserRole.ADMIN)
+    service.repo.get.return_value = other
+
+    with pytest.raises(PermissionDeniedError, match="Only the super admin"):
+        await service.update(
+            other.id, UserUpdate(**changes), acting_user=make_user(role=UserRole.ADMIN)
+        )
+    service.session.commit.assert_not_awaited()
+
+
+async def test_admin_can_deactivate_a_member(service: UserService) -> None:
+    member = make_user(role=UserRole.MEMBER)
+    service.repo.get.return_value = member
+
+    await service.update(
+        member.id, UserUpdate(is_active=False), acting_user=make_user(role=UserRole.ADMIN)
+    )
+
+    assert member.is_active is False
+
+
+async def test_super_admin_can_demote_an_admin(service: UserService) -> None:
+    other = make_user(role=UserRole.ADMIN)
+    service.repo.get.return_value = other
+
+    await service.update(
+        other.id,
+        UserUpdate(role=UserRole.MEMBER),
+        acting_user=make_user(role=UserRole.ADMIN, is_super_admin=True),
+    )
+
+    assert other.role == UserRole.MEMBER
+
+
+async def test_super_admins_cannot_be_changed_through_the_api(service: UserService) -> None:
+    root = make_user(role=UserRole.ADMIN, is_super_admin=True)
+    service.repo.get.return_value = root
+
+    with pytest.raises(NotFoundError, match="User not found"):
+        await service.update(
+            root.id,
+            UserUpdate(is_active=False),
+            acting_user=make_user(role=UserRole.ADMIN, is_super_admin=True),
+        )
+    assert root.is_active is True
 
 
 async def test_update_ignores_null_values(service: UserService) -> None:

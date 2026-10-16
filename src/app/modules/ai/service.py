@@ -1,5 +1,3 @@
-"""AI features: builds context from CRM data, calls the model, stores results."""
-
 import json
 import uuid
 from typing import Any
@@ -121,7 +119,7 @@ class AIService:
         return deal
 
 
-# --- Context helpers: plain dicts with only what the model needs ---
+# Context for the model: plain dicts with only what it needs.
 
 
 def _to_json(data: dict[str, Any]) -> str:

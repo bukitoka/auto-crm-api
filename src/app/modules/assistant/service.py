@@ -1,10 +1,3 @@
-"""The CRM assistant.
-
-- `AssistantAgent` runs one reply: DeepSeek calls tools (see tools.py) until it can answer.
-- `ConversationService` stores chats: every user message and reply is saved, so chats can be
-  continued later, renamed, archived or deleted (by their owner, or by an admin).
-"""
-
 import json
 import logging
 import uuid
@@ -29,10 +22,11 @@ from app.modules.assistant.schemas import (
     ConversationUpdate,
     MessageCreate,
     MessageRead,
+    MessageWithFiles,
     PageContext,
 )
 from app.modules.assistant.tools import TOOL_SPECS, TOOLS, ToolContext
-from app.modules.users.models import User, UserRole
+from app.modules.users.models import User
 from app.shared.pagination import Page, PageParams
 from app.shared.utils import today_utc, utc_now
 
@@ -138,7 +132,8 @@ class ConversationService:
         self, data: MessageCreate, *, user: User, ai: AIClient, mailer: Mailer
     ) -> ChatTurn:
         """Create a conversation from the first message and answer it."""
-        conversation = Conversation(user_id=user.id, title=_title_from(data.content))
+        title = _title_from(data.content or _file_names(data))
+        conversation = Conversation(user_id=user.id, title=title)
         await self.repo.add(conversation)
         conversation_id = conversation.id
         # Committed first: a failing tool rolls back the session, which must not lose the chat.
@@ -177,8 +172,11 @@ class ConversationService:
         mailer: Mailer,
     ) -> ChatTurn:
         previous = await self.repo.recent_messages(conversation_id, HISTORY_LIMIT - 1)
-        history = [{"role": m.role, "content": m.content} for m in previous]
-        history.append({"role": "user", "content": data.content})
+        attachments = _attachments(data)
+        history = [
+            {"role": m.role, "content": _model_content(m.content, m.attachments)} for m in previous
+        ]
+        history.append({"role": "user", "content": _model_content(data.content, attachments)})
 
         # If the AI call fails, nothing is stored: the user can simply send again.
         result = await AssistantAgent(self.session, ai, mailer).reply(
@@ -187,7 +185,11 @@ class ConversationService:
 
         conversation = await self.get(conversation_id, user=user)
         question = ConversationMessage(
-            conversation_id=conversation.id, role="user", content=data.content, actions=[]
+            conversation_id=conversation.id,
+            role="user",
+            content=data.content,
+            actions=[],
+            attachments=attachments,
         )
         answer = ConversationMessage(
             conversation_id=conversation.id,
@@ -225,7 +227,7 @@ class ConversationService:
 
     async def bulk(self, data: BulkAction, *, user: User) -> BulkResult:
         """Archive / restore / delete many. Admins may touch anyone's; others only their own."""
-        owner = None if user.role == UserRole.ADMIN else user.id
+        owner = None if user.is_admin else user.id
         ids = await self.repo.owned_ids(data.ids, owner)
         if data.action == "delete":
             await self.repo.delete_many(ids)
@@ -236,11 +238,11 @@ class ConversationService:
 
 
 def _can_manage(user: User, conversation: Conversation) -> bool:
-    return conversation.user_id == user.id or user.role == UserRole.ADMIN
+    return conversation.user_id == user.id or user.is_admin
 
 
 def _require_admin(user: User) -> None:
-    if user.role != UserRole.ADMIN:
+    if not user.is_admin:
         raise PermissionDeniedError("Admin privileges required")
 
 
@@ -250,6 +252,26 @@ def _title_from(text: str) -> str:
     if len(line) <= TITLE_LENGTH:
         return line
     return line[:TITLE_LENGTH].rsplit(" ", 1)[0].rstrip(",.;:") + "…"
+
+
+def _attachments(data: MessageCreate) -> list[dict[str, Any]]:
+    """[{name, text}] of the files sent with the message (only the multipart variant has any)."""
+    if not isinstance(data, MessageWithFiles):
+        return []
+    return [file.model_dump() for file in data.attachments]
+
+
+def _file_names(data: MessageCreate) -> str:
+    return ", ".join(file["name"] for file in _attachments(data))
+
+
+def _model_content(content: str, attachments: list[dict[str, Any]]) -> str:
+    """The user's text plus the text of each attached file, clearly delimited for the model."""
+    files = [
+        f"[Attached file: {file['name']}]\n{file['text']}\n[End of attached file: {file['name']}]"
+        for file in attachments
+    ]
+    return "\n\n".join(part for part in [content, *files] if part)
 
 
 def _system_prompt(user: User, context: PageContext | None) -> str:

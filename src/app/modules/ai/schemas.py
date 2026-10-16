@@ -3,8 +3,6 @@ from typing import Self
 
 from pydantic import BaseModel, Field, model_validator
 
-# --- Requests ---
-
 
 class EmailDraftRequest(BaseModel):
     contact_id: uuid.UUID
@@ -28,7 +26,7 @@ class ExtractContactRequest(BaseModel):
     text: str = Field(min_length=1, max_length=8000)
 
 
-# --- Responses (also the JSON shapes the model must return) ---
+# Responses are also the JSON shapes the model must return.
 
 
 class LeadScore(BaseModel):

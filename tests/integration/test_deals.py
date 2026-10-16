@@ -1,8 +1,10 @@
+from datetime import timedelta
 from typing import Any
 
 from httpx import AsyncClient
 
 from app.core.events import Event
+from app.shared.utils import today_utc
 
 
 async def _stages(client: AsyncClient, headers: dict[str, str]) -> dict[str, dict[str, Any]]:
@@ -126,6 +128,61 @@ async def test_dashboard_summary(client: AsyncClient, admin_headers: dict[str, s
     assert by_stage["Qualification"]["deal_count"] == 1
     assert by_stage["Won"]["total_value"] == 40
     assert [task["title"] for task in summary["my_tasks"]] == ["Old task"]
+
+
+async def test_dashboard_rates_lists_and_team(
+    client: AsyncClient, admin_headers: dict[str, str], member_headers: dict[str, str]
+) -> None:
+    stages = await _stages(client, admin_headers)
+    today = today_utc()
+
+    async def deal(headers: dict[str, str], **body: Any) -> dict[str, Any]:
+        return (await client.post("/api/v1/deals", json=body, headers=headers)).json()
+
+    async def task(title: str, due: Any) -> None:
+        body = {"title": title, "due_date": due.isoformat()}
+        await client.post("/api/v1/tasks", json=body, headers=admin_headers)
+
+    soon = await deal(
+        member_headers, title="Soon", value=300, expected_close_date=str(today + timedelta(5))
+    )
+    await deal(
+        admin_headers, title="Later", value=1, expected_close_date=str(today + timedelta(60))
+    )
+    for title, value, stage in [("W1", 100, "Won"), ("W2", 50, "Won"), ("L1", 10, "Lost")]:
+        await deal(admin_headers, title=title, value=value, stage_id=stages[stage]["id"])
+    contact = (
+        await client.post("/api/v1/contacts", json={"first_name": "C"}, headers=admin_headers)
+    ).json()
+    await client.post(
+        "/api/v1/activities",
+        json={"type": "call", "subject": "Hi", "contact_id": contact["id"]},
+        headers=admin_headers,
+    )
+    await task("Today", today)
+    await task("Friday", today + timedelta(3))
+    await task("Late", today - timedelta(2))
+
+    summary = (await client.get("/api/v1/dashboard/summary", headers=admin_headers)).json()
+
+    assert (summary["deals_won_this_month"], summary["deals_lost_this_month"]) == (2, 1)
+    assert summary["win_rate"] == 2 / 3
+    assert summary["average_deal_size"] == 75
+    assert (summary["tasks_due_today"], summary["tasks_due_this_week"]) == (1, 2)
+    assert [t["title"] for t in summary["overdue_task_list"]] == ["Late"]
+    assert [d["id"] for d in summary["deals_closing_soon"]] == [soon["id"]]
+    assert {r["status"]: r["count"] for r in summary["contacts_by_status"]}["lead"] == 1
+    assert {r["type"]: r["count"] for r in summary["activities_last_30_days"]} == {
+        "note": 0,
+        "call": 1,
+        "email": 0,
+        "meeting": 0,
+    }
+    team = [
+        (m["user"]["full_name"], m["open_deals_value"], m["won_this_month_value"], m["open_tasks"])
+        for m in summary["team"]
+    ]
+    assert team == [("Ada Admin", 1, 150, 3), ("Max Member", 300, 0, 0)]
 
 
 async def test_deal_crud_and_filters(client: AsyncClient, admin_headers: dict[str, str]) -> None:

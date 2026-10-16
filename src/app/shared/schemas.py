@@ -9,8 +9,6 @@ from app.core.storage import image_url
 
 
 class ORMModel(BaseModel):
-    """Base for response schemas built from ORM objects."""
-
     model_config = ConfigDict(from_attributes=True)
 
 

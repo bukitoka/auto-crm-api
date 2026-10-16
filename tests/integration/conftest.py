@@ -19,11 +19,12 @@ from sqlalchemy import text
 from sqlalchemy.engine import make_url
 
 from app.core import events
-from app.core.database import engine
+from app.core.database import SessionFactory, engine
 from app.core.email import get_mailer
 from app.core.events import Event
 from app.core.storage import get_storage
 from app.main import app
+from app.modules.users.service import UserService
 from app.seed import CRM_TABLES
 from tests.conftest import ROOT, TEST_API_KEY, TEST_DB_NAME
 from tests.fakes import FakeMailer, FakeStorage
@@ -52,8 +53,18 @@ def database() -> None:
     command.upgrade(Config(toml_file=ROOT / "pyproject.toml"), "head")
 
 
+SUPER_ADMIN_EMAIL = "root@example.com"
+PASSWORD = "s3cret-password"
+
+
 @pytest.fixture(autouse=True)
-async def clean_tables() -> AsyncGenerator[None]:
+async def clean_tables(request: pytest.FixtureRequest) -> AsyncGenerator[None]:
+    # Most tests start in a set-up workspace, so sign-ups work.
+    if not request.node.get_closest_marker("not_set_up"):
+        async with SessionFactory() as session:
+            await UserService(session).create_super_admin(
+                email=SUPER_ADMIN_EMAIL, password=PASSWORD, full_name="Root"
+            )
     yield
     await events.drain()
     async with engine.begin() as conn:
@@ -100,22 +111,35 @@ def api_key_headers() -> dict[str, str]:
 async def register_and_login(
     client: AsyncClient, email: str, full_name: str = "Test User"
 ) -> dict[str, str]:
-    """Register a user and return Authorization headers for them."""
-    password = "s3cret-password"
     response = await client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": password, "full_name": full_name},
+        json={"email": email, "password": PASSWORD, "full_name": full_name},
     )
     assert response.status_code == 201, response.text
-    response = await client.post("/api/v1/auth/login", json={"email": email, "password": password})
+    return await login(client, email)
+
+
+async def login(client: AsyncClient, email: str) -> dict[str, str]:
+    response = await client.post("/api/v1/auth/login", json={"email": email, "password": PASSWORD})
     assert response.status_code == 200, response.text
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
 @pytest.fixture
-async def admin_headers(client: AsyncClient) -> dict[str, str]:
-    """Headers for the first registered user (an admin)."""
-    return await register_and_login(client, "admin@example.com", "Ada Admin")
+async def super_admin_headers(client: AsyncClient) -> dict[str, str]:
+    return await login(client, SUPER_ADMIN_EMAIL)
+
+
+@pytest.fixture
+async def admin_headers(client: AsyncClient, super_admin_headers: dict[str, str]) -> dict[str, str]:
+    """Headers for Ada, a team member the super admin made an admin."""
+    headers = await register_and_login(client, "admin@example.com", "Ada Admin")
+    me = (await client.get("/api/v1/auth/me", headers=headers)).json()
+    response = await client.patch(
+        f"/api/v1/users/{me['id']}", json={"role": "admin"}, headers=super_admin_headers
+    )
+    assert response.status_code == 200, response.text
+    return headers
 
 
 @pytest.fixture

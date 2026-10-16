@@ -1,9 +1,11 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 from app.shared.schemas import ImageUrl, ORMModel, UserRef, reject_null
+from app.shared.sorting import SortOrder
 
 
 class CompanyBase(BaseModel):
@@ -34,6 +36,8 @@ class CompanyUpdate(BaseModel):
 class CompanyFilters(BaseModel):
     search: str | None = None
     industry: str | None = None
+    sort: Literal["name", "industry", "created_at"] | None = None
+    order: SortOrder = SortOrder.ASC
 
 
 class CompanyRead(ORMModel):

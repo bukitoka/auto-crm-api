@@ -15,7 +15,7 @@ from app.core.email import MailerDep
 from app.core.exceptions import AuthenticationError, PermissionDeniedError
 from app.core.security import is_valid_api_key
 from app.modules.auth.service import AuthService
-from app.modules.users.models import User, UserRole
+from app.modules.users.models import User
 
 bearer_scheme = HTTPBearer(auto_error=False)
 api_key_scheme = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -46,7 +46,7 @@ CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
 async def require_admin(user: CurrentUser) -> User:
-    if user.role != UserRole.ADMIN:
+    if not user.is_admin:
         raise PermissionDeniedError("Admin privileges required")
     return user
 

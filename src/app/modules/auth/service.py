@@ -19,6 +19,7 @@ from app.modules.auth.schemas import (
     LoginRequest,
     RegisterRequest,
     ResetPasswordRequest,
+    SetupStatus,
     TokenResponse,
 )
 from app.modules.users.models import User
@@ -37,6 +38,14 @@ class AuthService:
 
     async def register(self, data: RegisterRequest) -> User:
         return await self.users.create(
+            email=data.email, password=data.password, full_name=data.full_name
+        )
+
+    async def setup_status(self) -> SetupStatus:
+        return SetupStatus(needs_setup=not await self.user_repo.super_admin_exists())
+
+    async def setup(self, data: RegisterRequest) -> User:
+        return await self.users.setup(
             email=data.email, password=data.password, full_name=data.full_name
         )
 

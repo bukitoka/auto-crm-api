@@ -1,5 +1,3 @@
-"""Logging setup."""
-
 import logging
 
 

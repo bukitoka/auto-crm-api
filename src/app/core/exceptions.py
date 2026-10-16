@@ -13,8 +13,6 @@ logger = logging.getLogger(__name__)
 
 
 class AppError(Exception):
-    """Base class for all domain errors."""
-
     status_code: int = status.HTTP_400_BAD_REQUEST
     default_message: str = "Bad request"
 

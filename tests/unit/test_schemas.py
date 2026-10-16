@@ -1,5 +1,3 @@
-"""Request/response schema rules (validation happens before any service code runs)."""
-
 import uuid
 from decimal import Decimal
 
@@ -17,7 +15,7 @@ from app.modules.tasks.schemas import TaskUpdate
 from app.modules.webhooks.schemas import WebhookCreate, WebhookUpdate
 from tests.unit.conftest import make_deal
 
-# --- PATCH rules: omitted = unchanged, null clears optional fields, null on required = 422 ---
+# PATCH: omitted = unchanged, null clears optional fields, null on required = 422.
 
 
 @pytest.mark.parametrize(
@@ -52,9 +50,6 @@ def test_patch_leaves_omitted_fields_unset() -> None:
     assert update.model_dump(exclude_unset=True) == {"title": "Renamed"}
 
 
-# --- Contacts ---
-
-
 def test_contact_create_defaults() -> None:
     contact = ContactCreate(first_name="Jane")
 
@@ -71,9 +66,6 @@ def test_contact_create_rejects_invalid_email() -> None:
 def test_contact_create_requires_a_first_name() -> None:
     with pytest.raises(ValidationError):
         ContactCreate.model_validate({"first_name": ""})
-
-
-# --- Deals ---
 
 
 def test_deal_value_accepts_a_numeric_string() -> None:
@@ -102,9 +94,6 @@ def test_deal_read_serializes_value_as_a_number() -> None:
     assert data["value"] == 99.9
 
 
-# --- Activities / AI requests ---
-
-
 def test_activity_requires_a_contact_or_a_deal() -> None:
     with pytest.raises(ValidationError, match="contact_id and/or a deal_id"):
         ActivityCreate.model_validate({"type": "note", "subject": "Hi"})
@@ -128,9 +117,6 @@ def test_summarize_request_requires_a_contact_or_a_deal() -> None:
 def test_lead_score_must_be_between_0_and_100(score: int) -> None:
     with pytest.raises(ValidationError):
         LeadScore(score=score, reasoning="x")
-
-
-# --- Auth / webhooks ---
 
 
 def test_register_requires_a_password_of_at_least_8_characters() -> None:

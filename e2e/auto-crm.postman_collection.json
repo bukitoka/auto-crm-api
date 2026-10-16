@@ -58,18 +58,51 @@
       "description": "Register the first user (admin) and a member, then log in.",
       "item": [
         {
-          "name": "Register first user becomes admin",
+          "name": "Setup is needed on a new workspace",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
-                  "pm.test(\"response matches schema\", () => pm.response.to.have.jsonSchema({\"type\": \"object\", \"required\": [\"id\", \"email\", \"full_name\", \"role\", \"is_active\", \"created_at\", \"updated_at\"], \"properties\": {\"id\": {\"type\": \"string\", \"pattern\": \"^[0-9a-f-]{36}$\"}, \"role\": {\"enum\": [\"admin\", \"member\"]}}, \"not\": {\"required\": [\"hashed_password\"]}}));",
-                  "pm.test(\"first user is admin\", () => { const body = pm.response.json(); pm.expect(body.role).to.eql(\"admin\"); });",
-                  "pm.test(\"email is stored lowercase\", () => { const body = pm.response.json(); pm.expect(body.email).to.eql(pm.environment.get(\"adminEmail\")); });",
-                  "pm.collectionVariables.set(\"adminId\", pm.response.json().id);"
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"needs setup\", () => pm.expect(pm.response.json().needs_setup).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/setup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "setup"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Register before setup is 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));"
                 ]
               }
             }
@@ -97,12 +130,143 @@
             },
             "body": {
               "mode": "raw",
+              "raw": "{\n  \"email\": \"early@example.com\",\n  \"password\": \"{{password}}\",\n  \"full_name\": \"Early\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Setup creates the super admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"response matches schema\", () => pm.response.to.have.jsonSchema({\"type\": \"object\", \"required\": [\"id\", \"email\", \"full_name\", \"role\", \"is_active\", \"created_at\", \"updated_at\"], \"properties\": {\"id\": {\"type\": \"string\", \"pattern\": \"^[0-9a-f-]{36}$\"}, \"role\": {\"enum\": [\"admin\", \"member\"]}}, \"not\": {\"required\": [\"hashed_password\"]}}));",
+                  "pm.test(\"super admin\", () => { const body = pm.response.json(); pm.expect(body.role).to.eql(\"admin\"); pm.expect(body.is_super_admin).to.eql(true); });",
+                  "pm.test(\"email is stored lowercase\", () => { const body = pm.response.json(); pm.expect(body.email).to.eql(pm.environment.get(\"adminEmail\")); });",
+                  "pm.collectionVariables.set(\"adminId\", pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/setup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "setup"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
               "raw": "{\n  \"email\": \"{{adminEmailMixedCase}}\",\n  \"password\": \"{{password}}\",\n  \"full_name\": \"Ada Admin\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
+            }
+          }
+        },
+        {
+          "name": "Setup a second time is 409",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/setup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "setup"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"second-owner@example.com\",\n  \"password\": \"{{password}}\",\n  \"full_name\": \"Second Owner\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Setup is no longer needed",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"set up\", () => pm.expect(pm.response.json().needs_setup).to.eql(false));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/setup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "setup"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
             }
           }
         },
@@ -548,7 +712,7 @@
                 "exec": [
                   "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
                   "pm.test(\"response matches schema\", () => pm.response.to.have.jsonSchema({\"type\": \"object\", \"required\": [\"items\", \"total\", \"page\", \"size\"], \"properties\": {\"items\": {\"type\": \"array\", \"items\": {\"type\": \"object\", \"required\": [\"id\", \"email\", \"full_name\", \"role\", \"is_active\", \"created_at\", \"updated_at\"], \"properties\": {\"id\": {\"type\": \"string\", \"pattern\": \"^[0-9a-f-]{36}$\"}, \"role\": {\"enum\": [\"admin\", \"member\"]}}, \"not\": {\"required\": [\"hashed_password\"]}}}, \"total\": {\"type\": \"integer\"}}}));",
-                  "pm.test(\"two users\", () => { const body = pm.response.json(); pm.expect(body.total).to.eql(2); });"
+                  "pm.test(\"only the member: the super admin is not a team member\", () => { const body = pm.response.json(); pm.expect(body.total).to.eql(1); pm.expect(body.items[0].email).to.eql(pm.environment.get(\"memberEmail\")); });"
                 ]
               }
             }
@@ -622,15 +786,14 @@
           }
         },
         {
-          "name": "Admin cannot demote self (400)",
+          "name": "Super admin is not managed on the Team page (404)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 400\", () => pm.response.to.have.status(400));",
-                  "pm.test(\"detail is You cannot demote or deactivate yourself\", () => pm.expect(pm.response.json().detail).to.eql(\"You cannot demote or deactivate yourself\"));"
+                  "pm.test(\"status is 404\", () => pm.response.to.have.status(404));"
                 ]
               }
             }

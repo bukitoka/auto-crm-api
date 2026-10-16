@@ -1,10 +1,12 @@
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 from app.shared.schemas import CompanyRef, ContactRef, ORMModel, StageRef, UserRef, reject_null
+from app.shared.sorting import SortOrder
 
 Money = Decimal  # input amounts; responses use float for frontend simplicity
 
@@ -43,6 +45,8 @@ class DealFilters(BaseModel):
     contact_id: uuid.UUID | None = None
     company_id: uuid.UUID | None = None
     owner_id: uuid.UUID | None = None
+    sort: Literal["title", "value", "stage", "expected_close_date", "created_at"] | None = None
+    order: SortOrder = SortOrder.ASC
 
 
 class DealRead(ORMModel):

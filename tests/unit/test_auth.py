@@ -1,5 +1,3 @@
-"""AuthService and the authentication dependencies (JWT vs API key, admin-only)."""
-
 from unittest.mock import AsyncMock
 
 import pytest
@@ -146,8 +144,11 @@ async def test_no_credentials_is_unauthenticated(service: AuthService) -> None:
 # --- require_admin / require_api_key ---
 
 
-async def test_require_admin_allows_admins() -> None:
-    admin = make_user(role=UserRole.ADMIN)
+@pytest.mark.parametrize(
+    "overrides", [{"role": UserRole.ADMIN}, {"is_super_admin": True}], ids=["admin", "super_admin"]
+)
+async def test_require_admin_allows_admins_and_super_admins(overrides: dict) -> None:
+    admin = make_user(**overrides)
 
     assert await dependencies.require_admin(admin) is admin
 

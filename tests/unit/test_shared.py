@@ -22,8 +22,6 @@ from app.shared.pagination import Page, PageParams
 from app.shared.schemas import reject_null
 from tests.unit.conftest import make_user
 
-# --- utils ---
-
 
 @pytest.mark.parametrize(
     ("search", "expected"),
@@ -54,9 +52,6 @@ def test_utc_now_is_timezone_aware() -> None:
     assert utils.utc_now().tzinfo is UTC
 
 
-# --- pagination ---
-
-
 @pytest.mark.parametrize(("page", "size", "offset"), [(1, 20, 0), (2, 20, 20), (3, 50, 100)])
 def test_page_params_offset(page: int, size: int, offset: int) -> None:
     assert PageParams(page=page, size=size).offset == offset
@@ -71,9 +66,6 @@ def test_page_from_items_converts_orm_objects() -> None:
     assert (page.total, page.page, page.size) == (7, 2, 2)
 
 
-# --- schemas ---
-
-
 def test_reject_null_passes_values_through() -> None:
     assert reject_null("value") == "value"
     assert reject_null(0) == 0
@@ -83,8 +75,6 @@ def test_reject_null_rejects_none() -> None:
     with pytest.raises(ValueError, match="may not be null"):
         reject_null(None)
 
-
-# --- exceptions ---
 
 REQUEST = Request(scope={"type": "http"})
 

@@ -6,8 +6,6 @@ from pydantic import BaseModel, Field
 
 from app.shared.schemas import ORMModel, UserRef
 
-# --- What the assistant did ---
-
 EntityType = Literal["contact", "company", "deal", "task", "activity"]
 
 
@@ -28,9 +26,6 @@ class AssistantReply(BaseModel):
     actions: list[AssistantAction]
 
 
-# --- Requests ---
-
-
 class PageContext(BaseModel):
     """The record the user is looking at, so "this contact" / "this deal" work."""
 
@@ -41,6 +36,29 @@ class PageContext(BaseModel):
 class MessageCreate(BaseModel):
     content: str = Field(min_length=1, max_length=4000)
     context: PageContext | None = None
+
+
+MAX_ATTACHMENTS = 3
+
+
+class AttachedFile(BaseModel):
+    """A file sent with a message: its name, and the text read from it (for the model)."""
+
+    name: str
+    text: str
+
+
+class MessageWithFiles(MessageCreate):
+    """The multipart variant (built by the router): the text is optional when files come along."""
+
+    content: str = Field(default="", max_length=4000)
+    attachments: list[AttachedFile] = Field(min_length=1, max_length=MAX_ATTACHMENTS)
+
+
+class Transcript(BaseModel):
+    """What was said in a voice recording. Empty when no speech was recognized."""
+
+    text: str
 
 
 class ConversationUpdate(BaseModel):
@@ -63,7 +81,8 @@ class BulkAction(BaseModel):
     action: Literal["archive", "unarchive", "delete"]
 
 
-# --- Responses ---
+class AttachmentRead(BaseModel):
+    name: str
 
 
 class MessageRead(ORMModel):
@@ -71,6 +90,7 @@ class MessageRead(ORMModel):
     role: Literal["user", "assistant"]
     content: str
     actions: list[AssistantAction]
+    attachments: list[AttachmentRead]  # file names only; their text is kept for the model
     created_at: datetime
 
 

@@ -1,3 +1,4 @@
+import pytest
 from httpx import AsyncClient
 
 from tests.integration.conftest import register_and_login
@@ -9,21 +10,36 @@ async def test_health(client: AsyncClient) -> None:
     assert response.json() == {"status": "ok"}
 
 
-async def test_first_user_is_admin_and_next_is_member(client: AsyncClient) -> None:
-    first = await client.post(
+@pytest.mark.not_set_up
+async def test_setup_creates_the_super_admin_once(client: AsyncClient) -> None:
+    account = {"email": "Owner@Example.com", "password": "password123", "full_name": "Owner"}
+    assert (await client.get("/api/v1/auth/setup")).json() == {"needs_setup": True}
+    early = await client.post("/api/v1/auth/register", json=account)
+    assert early.status_code == 403
+
+    created = await client.post("/api/v1/auth/setup", json=account)
+    again = await client.post("/api/v1/auth/setup", json=account | {"email": "x@example.com"})
+
+    assert created.status_code == 201
+    assert (created.json()["email"], created.json()["is_super_admin"]) == (
+        "owner@example.com",
+        True,
+    )
+    assert (await client.get("/api/v1/auth/setup")).json() == {"needs_setup": False}
+    assert again.status_code == 409
+    assert again.json() == {"detail": "The workspace is already set up"}
+
+
+async def test_sign_ups_become_members(client: AsyncClient) -> None:
+    response = await client.post(
         "/api/v1/auth/register",
         json={"email": "First@Example.com", "password": "password123", "full_name": "First"},
     )
-    second = await client.post(
-        "/api/v1/auth/register",
-        json={"email": "second@example.com", "password": "password123", "full_name": "Second"},
-    )
 
-    assert first.status_code == 201
-    assert first.json()["role"] == "admin"
-    assert first.json()["email"] == "first@example.com"
-    assert "hashed_password" not in first.json()
-    assert second.json()["role"] == "member"
+    assert response.status_code == 201
+    assert (response.json()["role"], response.json()["is_super_admin"]) == ("member", False)
+    assert response.json()["email"] == "first@example.com"
+    assert "hashed_password" not in response.json()
 
 
 async def test_register_duplicate_email_conflicts(client: AsyncClient) -> None:
@@ -69,34 +85,74 @@ async def test_api_key_authenticates_as_service_account(
     assert wrong.status_code == 401
 
 
-async def test_service_account_does_not_take_first_admin_slot(
-    client: AsyncClient, api_key_headers: dict[str, str]
-) -> None:
-    await client.get("/api/v1/auth/me", headers=api_key_headers)  # creates the service account
-    response = await client.post(
-        "/api/v1/auth/register",
-        json={"email": "boss@example.com", "password": "password123", "full_name": "Boss"},
-    )
-    assert response.json()["role"] == "admin"
-
-
-async def test_only_admins_can_update_users(
-    client: AsyncClient, admin_headers: dict[str, str], member_headers: dict[str, str]
+async def test_only_super_admins_can_make_admins(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    member_headers: dict[str, str],
+    super_admin_headers: dict[str, str],
 ) -> None:
     users = (await client.get("/api/v1/users", headers=admin_headers)).json()
     assert users["total"] == 2
     member = next(u for u in users["items"] if u["role"] == "member")
+    url = f"/api/v1/users/{member['id']}"
 
-    forbidden = await client.patch(
-        f"/api/v1/users/{member['id']}", json={"role": "admin"}, headers=member_headers
-    )
-    assert forbidden.status_code == 403
+    by_member = await client.patch(url, json={"role": "admin"}, headers=member_headers)
+    by_admin = await client.patch(url, json={"role": "admin"}, headers=admin_headers)
+    assert (by_member.status_code, by_admin.status_code) == (403, 403)
 
-    promoted = await client.patch(
-        f"/api/v1/users/{member['id']}", json={"role": "admin"}, headers=admin_headers
-    )
+    promoted = await client.patch(url, json={"role": "admin"}, headers=super_admin_headers)
     assert promoted.status_code == 200
     assert promoted.json()["role"] == "admin"
+
+
+async def test_admins_manage_members_but_not_admins(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    member_headers: dict[str, str],
+    super_admin_headers: dict[str, str],
+) -> None:
+    await register_and_login(client, "other@example.com", "Olga Other")
+    users = (await client.get("/api/v1/users", headers=admin_headers)).json()["items"]
+    url = {u["email"]: f"/api/v1/users/{u['id']}" for u in users}
+    # The super admin makes Max an admin; Max can then use admin routes.
+    await client.patch(
+        url["member@example.com"], json={"role": "admin"}, headers=super_admin_headers
+    )
+    assert (await client.get("/api/v1/webhooks", headers=member_headers)).status_code == 200
+
+    deactivate_member = await client.patch(
+        url["other@example.com"], json={"is_active": False}, headers=member_headers
+    )
+    grant_admin = await client.patch(
+        url["other@example.com"], json={"role": "admin"}, headers=member_headers
+    )
+    demote_admin = await client.patch(
+        url["admin@example.com"], json={"role": "member"}, headers=member_headers
+    )
+
+    assert deactivate_member.status_code == 200
+    assert grant_admin.status_code == 403
+    assert demote_admin.status_code == 403
+    assert demote_admin.json() == {"detail": "Only the super admin can manage admins"}
+
+
+async def test_super_admins_are_not_part_of_the_team(
+    client: AsyncClient, admin_headers: dict[str, str], super_admin_headers: dict[str, str]
+) -> None:
+    root = (await client.get("/api/v1/auth/me", headers=super_admin_headers)).json()
+    assert (root["is_super_admin"], root["role"]) == (True, "admin")
+
+    for headers in (admin_headers, super_admin_headers):
+        users = (await client.get("/api/v1/users", headers=headers)).json()["items"]
+        assert [u["email"] for u in users] == ["admin@example.com"]
+    hidden = await client.patch(
+        f"/api/v1/users/{root['id']}", json={"is_active": False}, headers=admin_headers
+    )
+    assert hidden.status_code == 404
+    # The super admin has every admin permission.
+    assert (await client.get("/api/v1/webhooks", headers=super_admin_headers)).status_code == 200
+    summary = (await client.get("/api/v1/dashboard/summary", headers=super_admin_headers)).json()
+    assert [row["user"]["full_name"] for row in summary["team"]] == ["Ada Admin"]
 
 
 async def test_users_search(
@@ -115,7 +171,7 @@ async def test_admin_cannot_demote_self(client: AsyncClient, admin_headers: dict
     )
 
     assert response.status_code == 400
-    assert response.json() == {"detail": "You cannot demote or deactivate yourself"}
+    assert response.json() == {"detail": "You cannot change your own role or deactivate yourself"}
 
 
 async def test_deactivated_user_cannot_use_their_token(

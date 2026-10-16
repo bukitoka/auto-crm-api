@@ -12,8 +12,22 @@ from app.modules.tasks.repository import TaskRepository
 from app.modules.tasks.schemas import TaskCreate, TaskFilters, TaskRead, TaskUpdate
 from app.modules.users.models import User
 from app.modules.users.repository import UserRepository
+from app.shared.csv_files import contact_name, to_csv
 from app.shared.pagination import Page, PageParams
 from app.shared.utils import utc_now
+
+CSV_COLUMNS = [
+    "title",
+    "description",
+    "due_date",
+    "priority",
+    "status",
+    "assignee",
+    "contact",
+    "deal",
+    "completed_at",
+    "created_at",
+]
 
 
 class TaskService:
@@ -33,6 +47,27 @@ class TaskService:
     async def list_page(self, filters: TaskFilters, params: PageParams) -> Page[TaskRead]:
         items, total = await self.repo.list_page(filters, offset=params.offset, limit=params.size)
         return Page[TaskRead].from_items(items, total, params)
+
+    async def export_csv(self, filters: TaskFilters) -> str:
+        tasks = await self.repo.list_all(filters)
+        return to_csv(
+            CSV_COLUMNS,
+            (
+                [
+                    task.title,
+                    task.description,
+                    task.due_date,
+                    task.priority,
+                    task.status,
+                    task.assignee.full_name if task.assignee else None,
+                    contact_name(task.contact),
+                    task.deal.title if task.deal else None,
+                    task.completed_at.isoformat() if task.completed_at else None,
+                    task.created_at.isoformat(),
+                ]
+                for task in tasks
+            ),
+        )
 
     async def create(self, data: TaskCreate, *, user: User) -> Task:
         await self._check_references(data.model_dump())

@@ -1,5 +1,3 @@
-"""Declarative base and reusable column mixins for ORM models."""
-
 import uuid
 from datetime import datetime
 

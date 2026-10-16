@@ -1,5 +1,3 @@
-"""Images (Pillow), object storage (MinIO SDK) and SMTP, all without real services."""
-
 import io
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock

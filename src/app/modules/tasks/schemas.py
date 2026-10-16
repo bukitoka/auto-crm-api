@@ -1,10 +1,12 @@
 import uuid
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 from app.modules.tasks.models import TaskPriority, TaskStatus
 from app.shared.schemas import ContactRef, DealRef, ORMModel, UserRef, reject_null
+from app.shared.sorting import SortOrder
 
 
 class TaskCreate(BaseModel):
@@ -39,6 +41,8 @@ class TaskFilters(BaseModel):
     deal_id: uuid.UUID | None = None
     overdue: bool | None = None  # true: due before today and not done
     open: bool | None = None  # true: not done; false: done
+    sort: Literal["title", "due_date", "priority", "status", "created_at"] | None = None
+    order: SortOrder = SortOrder.ASC
 
 
 class TaskRead(ORMModel):

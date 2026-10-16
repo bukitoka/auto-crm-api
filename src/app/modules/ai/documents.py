@@ -1,14 +1,7 @@
-"""Turn an uploaded file into plain text for the AI (smart capture).
+"""DeepSeek only reads text, so uploaded files are converted to plain text first.
 
-DeepSeek only reads text, so every file is converted first:
-
-| File                         | How                                                |
-| ---------------------------- | -------------------------------------------------- |
-| Image (JPEG, PNG, WebP, GIF) | OCR with RapidOCR (runs locally, models included)  |
-| PDF                          | the PDF's text; scanned pages fall back to OCR     |
-| Word (.docx)                 | paragraphs and tables                              |
-| Email (.eml)                 | headers (From, Subject…) and the plain-text body   |
-| Text (.txt, .csv, .md, .vcf) | read as UTF-8                                      |
+Images go through RapidOCR (runs locally, models included); scanned PDFs without a
+text layer fall back to the same OCR.
 """
 
 import asyncio

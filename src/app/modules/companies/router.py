@@ -1,7 +1,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Query, UploadFile, status
+from fastapi import APIRouter, Query, Response, UploadFile, status
 
 from app.modules.auth.dependencies import CurrentUser
 from app.modules.companies.dependencies import CompanyServiceDep
@@ -11,6 +11,7 @@ from app.modules.companies.schemas import (
     CompanyRead,
     CompanyUpdate,
 )
+from app.shared.csv_files import ImportResult, csv_response, read_csv
 from app.shared.images import read_image
 from app.shared.pagination import Page, PageParamsDep
 
@@ -25,6 +26,20 @@ async def list_companies(
     filters: Annotated[CompanyFilters, Query()],
 ):
     return await service.list_page(filters, params)
+
+
+@router.get("/export", response_class=Response)
+async def export_companies(
+    service: CompanyServiceDep, _: CurrentUser, filters: Annotated[CompanyFilters, Query()]
+):
+    """All companies matching the list filters and sort, as CSV."""
+    return csv_response(await service.export_csv(filters), "companies.csv")
+
+
+@router.post("/import", response_model=ImportResult)
+async def import_companies(file: UploadFile, service: CompanyServiceDep, user: CurrentUser):
+    """Create companies from a CSV file (max 2 MB) with the export's columns."""
+    return await service.import_csv(await read_csv(file), user=user)
 
 
 @router.post("", response_model=CompanyRead, status_code=status.HTTP_201_CREATED)

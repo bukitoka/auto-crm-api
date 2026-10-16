@@ -1,5 +1,3 @@
-"""Password hashing and JWT helpers."""
-
 import hashlib
 import secrets
 import uuid
@@ -79,5 +77,4 @@ def is_valid_api_key(api_key: str) -> bool:
 
 
 def generate_secret() -> str:
-    """Random secret, e.g. for signing webhooks."""
     return secrets.token_urlsafe(32)

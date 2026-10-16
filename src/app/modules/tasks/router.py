@@ -1,11 +1,12 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Query, Response, status
 
 from app.modules.auth.dependencies import CurrentUser
 from app.modules.tasks.dependencies import TaskServiceDep
 from app.modules.tasks.schemas import TaskCreate, TaskFilters, TaskRead, TaskUpdate
+from app.shared.csv_files import csv_response
 from app.shared.pagination import Page, PageParamsDep
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -19,6 +20,14 @@ async def list_tasks(
     filters: Annotated[TaskFilters, Query()],
 ):
     return await service.list_page(filters, params)
+
+
+@router.get("/export", response_class=Response)
+async def export_tasks(
+    service: TaskServiceDep, _: CurrentUser, filters: Annotated[TaskFilters, Query()]
+):
+    """All tasks matching the list filters and sort, as CSV."""
+    return csv_response(await service.export_csv(filters), "tasks.csv")
 
 
 @router.post("", response_model=TaskRead, status_code=status.HTTP_201_CREATED)

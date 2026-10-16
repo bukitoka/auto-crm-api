@@ -21,10 +21,9 @@ class IntegrationService:
         self.activities = ActivityRepository(session)
 
     async def ingest_lead(self, data: LeadIntake, *, user: User) -> tuple[Contact, bool]:
-        """Create a lead (or reuse the contact with the same email).
+        """Create a lead, or reuse the contact with the same email.
 
-        The optional message is stored as a note activity.
-        Returns the contact and whether it was newly created.
+        Returns the contact and whether it was created. The optional message becomes a note.
         """
         contact = await self.contacts.get_by_email(data.email)
         created = contact is None

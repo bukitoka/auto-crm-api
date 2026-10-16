@@ -1,11 +1,12 @@
 import uuid
 
-from sqlalchemy import ColumnElement, and_, func, not_, select
+from sqlalchemy import ColumnElement, Select, and_, case, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.modules.tasks.models import Task, TaskStatus
+from app.modules.tasks.models import Task, TaskPriority, TaskStatus
 from app.modules.tasks.schemas import TaskFilters
+from app.shared.sorting import sort_by
 from app.shared.utils import like_pattern, today_utc
 
 _LOAD_RELATED = (
@@ -14,6 +15,14 @@ _LOAD_RELATED = (
     joinedload(Task.contact),
     joinedload(Task.deal),
 )
+# Enum columns sort in their declared order (low < medium < high, todo < done).
+_SORT_COLUMNS = {
+    "title": func.lower(Task.title),
+    "due_date": Task.due_date,
+    "priority": case({p: i for i, p in enumerate(TaskPriority)}, value=Task.priority),
+    "status": case({s: i for i, s in enumerate(TaskStatus)}, value=Task.status),
+    "created_at": Task.created_at,
+}
 
 
 def _is_overdue() -> ColumnElement[bool]:
@@ -41,34 +50,17 @@ class TaskRepository:
     async def list_page(
         self, filters: TaskFilters, *, offset: int, limit: int
     ) -> tuple[list[Task], int]:
-        query = select(Task)
-        if filters.search:
-            query = query.where(Task.title.ilike(like_pattern(filters.search)))
-        if filters.status:
-            query = query.where(Task.status == filters.status)
-        if filters.assignee_id:
-            query = query.where(Task.assignee_id == filters.assignee_id)
-        if filters.contact_id:
-            query = query.where(Task.contact_id == filters.contact_id)
-        if filters.deal_id:
-            query = query.where(Task.deal_id == filters.deal_id)
-        if filters.open is True:
-            query = query.where(Task.status != TaskStatus.DONE)
-        elif filters.open is False:
-            query = query.where(Task.status == TaskStatus.DONE)
-        if filters.overdue is True:
-            query = query.where(_is_overdue())
-        elif filters.overdue is False:
-            query = query.where(not_(_is_overdue()))
-
+        query = _filtered(filters)
         total = await self.session.scalar(select(func.count()).select_from(query.subquery()))
         result = await self.session.execute(
-            query.options(*_LOAD_RELATED)
-            .order_by(Task.due_date.asc().nulls_last(), Task.created_at.desc())
-            .offset(offset)
-            .limit(limit)
+            _sorted(query, filters).options(*_LOAD_RELATED).offset(offset).limit(limit)
         )
         return list(result.scalars()), total or 0
+
+    async def list_all(self, filters: TaskFilters) -> list[Task]:
+        """Every matching task, in list order (for CSV export)."""
+        query = _sorted(_filtered(filters), filters).options(*_LOAD_RELATED)
+        return list((await self.session.execute(query)).scalars())
 
     async def list_open_for_assignee(self, assignee_id: uuid.UUID, limit: int) -> list[Task]:
         result = await self.session.execute(
@@ -94,3 +86,32 @@ class TaskRepository:
     async def delete(self, task: Task) -> None:
         await self.session.delete(task)
         await self.session.flush()
+
+
+def _filtered(filters: TaskFilters) -> Select[Task]:
+    query = select(Task)
+    if filters.search:
+        query = query.where(Task.title.ilike(like_pattern(filters.search)))
+    if filters.status:
+        query = query.where(Task.status == filters.status)
+    if filters.assignee_id:
+        query = query.where(Task.assignee_id == filters.assignee_id)
+    if filters.contact_id:
+        query = query.where(Task.contact_id == filters.contact_id)
+    if filters.deal_id:
+        query = query.where(Task.deal_id == filters.deal_id)
+    if filters.open is True:
+        query = query.where(Task.status != TaskStatus.DONE)
+    elif filters.open is False:
+        query = query.where(Task.status == TaskStatus.DONE)
+    if filters.overdue is True:
+        query = query.where(_is_overdue())
+    elif filters.overdue is False:
+        query = query.where(not_(_is_overdue()))
+    return query
+
+
+def _sorted(query: Select[Task], filters: TaskFilters) -> Select[Task]:
+    if filters.sort is None:
+        return query.order_by(Task.due_date.asc().nulls_last(), Task.created_at.desc())
+    return query.order_by(sort_by(_SORT_COLUMNS[filters.sort], filters.order), Task.id)

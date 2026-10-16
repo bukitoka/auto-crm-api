@@ -47,7 +47,7 @@ from app.modules.pipeline.repository import PipelineRepository
 from app.modules.tasks.models import Task, TaskPriority, TaskStatus
 from app.modules.tasks.schemas import TaskCreate, TaskFilters, TaskRead, TaskUpdate
 from app.modules.tasks.service import TaskService
-from app.modules.users.models import User, UserRole
+from app.modules.users.models import User
 from app.modules.users.service import SERVICE_ACCOUNT_EMAIL, UserService
 from app.modules.webhooks.service import WebhookService
 from app.shared.pagination import PageParams
@@ -557,12 +557,30 @@ async def get_dashboard_summary(ctx: ToolContext, _: NoParams) -> dict[str, Any]
     return {
         "open_pipeline_value": summary.open_pipeline_value,
         "won_this_month_value": summary.won_this_month_value,
+        "deals_won_this_month": summary.deals_won_this_month,
+        "deals_lost_this_month": summary.deals_lost_this_month,
+        "win_rate_last_90_days": summary.win_rate,
+        "average_won_deal_size_last_90_days": summary.average_deal_size,
         "new_leads_this_month": summary.new_leads_this_month,
         "overdue_tasks_all_users": summary.overdue_tasks,
         "overdue_task_list": [_task_view(t) for t in overdue.items],
+        "tasks_due_today_all_users": summary.tasks_due_today,
+        "tasks_due_next_7_days_all_users": summary.tasks_due_this_week,
         "pipeline_by_stage": [
             {"stage": s.stage_name, "deals": s.deal_count, "value": s.total_value}
             for s in summary.pipeline_by_stage
+        ],
+        "contacts_by_status": {c.status: c.count for c in summary.contacts_by_status},
+        "activities_last_30_days": {a.type: a.count for a in summary.activities_last_30_days},
+        "deals_closing_next_30_days": [_deal_view(d) for d in summary.deals_closing_soon],
+        "team": [
+            {
+                "name": m.user.full_name,
+                "open_deals_value": m.open_deals_value,
+                "won_this_month_value": m.won_this_month_value,
+                "open_tasks": m.open_tasks,
+            }
+            for m in summary.team
         ],
         "my_open_tasks_soonest_10": [_task_view(t) for t in summary.my_tasks],
         "recent_activities": [_activity_view(a) for a in summary.recent_activities],
@@ -582,7 +600,7 @@ async def list_activities(ctx: ToolContext, params: ActivityListParams) -> dict[
 
 
 async def list_automations(ctx: ToolContext, _: NoParams) -> dict[str, Any]:
-    if ctx.user.role != UserRole.ADMIN:
+    if not ctx.user.is_admin:
         raise PermissionDeniedError("Only admins can see automations")
     page = await ctx.webhooks.list_page(_page(50))
     return {
@@ -760,8 +778,10 @@ _TOOL_LIST = [
     ),
     Tool(
         "get_dashboard_summary",
-        "Same numbers as the dashboard: pipeline value, won this month, new leads, overdue "
-        "tasks (whole team, with the list), deals per stage, my tasks, recent activities.",
+        "Same numbers as the dashboard: pipeline value, won/lost this month, win rate, average "
+        "deal size, new leads, overdue and due tasks (whole team, with the list), deals per "
+        "stage, deals closing soon, leads by status, activity counts, team leaderboard, my "
+        "tasks, recent activities.",
         NoParams,
         get_dashboard_summary,
     ),

@@ -14,9 +14,23 @@ from app.modules.pipeline.models import PipelineStage
 from app.modules.pipeline.repository import PipelineRepository
 from app.modules.users.models import User
 from app.modules.users.repository import UserRepository
+from app.shared.csv_files import contact_name, to_csv
 from app.shared.pagination import Page, PageParams
 from app.shared.schemas import StageRef
 from app.shared.utils import utc_now
+
+CSV_COLUMNS = [
+    "title",
+    "value",
+    "currency",
+    "stage",
+    "contact",
+    "company",
+    "owner",
+    "expected_close_date",
+    "closed_at",
+    "created_at",
+]
 
 
 class DealService:
@@ -37,6 +51,27 @@ class DealService:
     async def list_page(self, filters: DealFilters, params: PageParams) -> Page[DealRead]:
         items, total = await self.repo.list_page(filters, offset=params.offset, limit=params.size)
         return Page[DealRead].from_items(items, total, params)
+
+    async def export_csv(self, filters: DealFilters) -> str:
+        deals = await self.repo.list_all(filters)
+        return to_csv(
+            CSV_COLUMNS,
+            (
+                [
+                    deal.title,
+                    deal.value,
+                    deal.currency,
+                    deal.stage.name,
+                    contact_name(deal.contact),
+                    deal.company.name if deal.company else None,
+                    deal.owner.full_name if deal.owner else None,
+                    deal.expected_close_date,
+                    deal.closed_at.isoformat() if deal.closed_at else None,
+                    deal.created_at.isoformat(),
+                ]
+                for deal in deals
+            ),
+        )
 
     async def create(self, data: DealCreate, *, user: User) -> Deal:
         await self._check_references(data.model_dump())

@@ -1,4 +1,4 @@
-"""FastAPI application factory. Run with: uv run fastapi dev src/app/main.py"""
+"""Run with: uv run fastapi dev src/app/main.py"""
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager

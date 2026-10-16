@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -45,4 +45,8 @@ class ConversationMessage(UUIDPrimaryKeyMixin, Base):
     content: Mapped[str] = mapped_column(Text)
     # What the assistant changed in the CRM during this reply (AssistantAction dicts).
     actions: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    # Files the user attached: [{name, text}]. The text is what the model reads.
+    attachments: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb")
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

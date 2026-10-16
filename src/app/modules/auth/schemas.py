@@ -7,6 +7,10 @@ class RegisterRequest(BaseModel):
     full_name: str = Field(min_length=1, max_length=200)
 
 
+class SetupStatus(BaseModel):
+    needs_setup: bool  # true until the super admin exists
+
+
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str

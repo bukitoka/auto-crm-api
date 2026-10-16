@@ -3,11 +3,10 @@
 Run with:  uv run seed            (refuses if the database already has CRM data)
            uv run seed --reset    (empties the CRM tables first, then seeds)
 
-Records are created through the services, so the normal business rules and defaults
-apply (first user is admin, deal closed_at, task completed_at, ...). No event handlers
-are subscribed outside the web app, so no webhooks are called.
-Faker and `random` use a fixed seed: every run produces the same names and amounts.
-The pipeline stages come from the migrations and are left untouched.
+Records are created through the services, so the usual business rules and defaults
+apply. No event handlers are subscribed outside the web app, so no webhooks fire.
+Faker and `random` use a fixed seed, so every run produces the same data.
+Pipeline stages come from the migrations and are left untouched.
 """
 
 import argparse
@@ -45,7 +44,7 @@ from app.modules.pipeline.repository import PipelineRepository
 from app.modules.tasks.models import TaskPriority, TaskStatus
 from app.modules.tasks.schemas import TaskCreate
 from app.modules.tasks.service import TaskService
-from app.modules.users.models import User
+from app.modules.users.models import User, UserRole
 from app.modules.users.service import SERVICE_ACCOUNT_EMAIL, UserService
 from app.modules.webhooks.schemas import WebhookCreate
 from app.modules.webhooks.service import WebhookService
@@ -54,6 +53,8 @@ from app.shared.utils import today_utc, utc_now
 RANDOM_SEED = 42
 
 ADMIN = ("admin@example.com", "admin12345", "Alex Admin")
+# Not a team member: owns nothing and is hidden from user lists.
+SUPER_ADMIN = ("superadmin@example.com", "superadmin12345", "Super Admin")
 MEMBERS = [
     ("sarah@example.com", "member12345", "Sarah Chen"),
     ("marco@example.com", "member12345", "Marco Rossi"),
@@ -146,10 +147,15 @@ class Seeder:
 
     async def _create_users(self) -> list[User]:
         service = UserService(self.session)
+        # Sign-ups need a set-up workspace; keep a super admin made on the setup page.
+        if not await service.repo.super_admin_exists():
+            email, password, full_name = SUPER_ADMIN
+            await service.create_super_admin(email=email, password=password, full_name=full_name)
         users = []
         for email, password, full_name in [ADMIN, *MEMBERS]:
-            # The first user created becomes the admin (business rule in UserService).
             users.append(await service.create(email=email, password=password, full_name=full_name))
+        users[0].role = UserRole.ADMIN
+        await self.session.commit()
         return users
 
     async def _create_companies(self, users: list[User]) -> list[Company]:
@@ -303,9 +309,11 @@ class Seeder:
 
 
 async def has_crm_data(session: AsyncSession) -> bool:
-    """True if any user (other than the service account) or company exists."""
+    """True if any team member or company exists (the super admin may be set up first)."""
     users = await session.scalar(
-        select(func.count()).select_from(User).where(User.email != SERVICE_ACCOUNT_EMAIL)
+        select(func.count())
+        .select_from(User)
+        .where(User.email != SERVICE_ACCOUNT_EMAIL, User.is_super_admin.is_(False))
     )
     companies = await session.scalar(select(func.count()).select_from(Company))
     return bool(users or companies)
@@ -341,9 +349,12 @@ async def seed(*, reset: bool) -> int:
         f"{summary.tasks} tasks and {summary.webhooks} webhook subscriptions (inactive)."
     )
     print("\nLog in with:")
-    for email, password, _ in [ADMIN, *MEMBERS]:
-        role = "admin " if email == ADMIN[0] else "member"
-        print(f"  {role}  {email}  /  {password}")
+    for label, (email, password, _) in [
+        ("super admin", SUPER_ADMIN),
+        ("admin      ", ADMIN),
+        *(("member     ", member) for member in MEMBERS),
+    ]:
+        print(f"  {label}  {email}  /  {password}")
     return 0
 
 

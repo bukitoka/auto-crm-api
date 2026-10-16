@@ -7,6 +7,7 @@ from app.modules.auth.schemas import (
     MessageResponse,
     RegisterRequest,
     ResetPasswordRequest,
+    SetupStatus,
     TokenResponse,
 )
 from app.modules.users.schemas import UserRead
@@ -14,8 +15,20 @@ from app.modules.users.schemas import UserRead
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+@router.get("/setup", response_model=SetupStatus)
+async def setup_status(service: AuthServiceDep):
+    return await service.setup_status()
+
+
+@router.post("/setup", response_model=UserRead, status_code=status.HTTP_201_CREATED)
+async def setup(data: RegisterRequest, service: AuthServiceDep):
+    """Create the super admin of a new workspace. Answers 409 once the workspace is set up."""
+    return await service.setup(data)
+
+
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 async def register(data: RegisterRequest, service: AuthServiceDep):
+    """New accounts are members. Answers 403 until the workspace is set up."""
     return await service.register(data)
 
 

@@ -6,10 +6,6 @@ here before any test module imports the app:
 - `DATABASE_URL` points at `auto_crm_test` (only the integration tests connect to it),
 - the automation API key is a known test value,
 - the DeepSeek key is empty (AI calls are always faked).
-
-Layout:
-- `tests/unit/`        pure logic, no database (fake repositories, mocked HTTP).
-- `tests/integration/` real HTTP requests against the app and the test database.
 """
 
 import os
@@ -19,7 +15,8 @@ from dotenv import dotenv_values
 from sqlalchemy.engine import make_url
 
 ROOT = Path(__file__).resolve().parent.parent
-TEST_DB_NAME = "auto_crm_test"
+# Overridable so concurrent test runs can use separate databases.
+TEST_DB_NAME = os.environ.get("TEST_DB_NAME", "auto_crm_test")
 TEST_API_KEY = "test-automation-key"
 
 

@@ -13,8 +13,6 @@ from app.modules.users.models import User
 
 
 class EmailService:
-    """Sends emails to contacts and logs each one on the contact's timeline."""
-
     def __init__(self, session: AsyncSession, mailer: Mailer | None = None) -> None:
         self.contacts = ContactService(session)
         self.activities = ActivityService(session)

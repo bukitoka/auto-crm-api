@@ -1,5 +1,3 @@
-"""Webhook subscriptions (service) and event delivery (HMAC signing, HTTP mocked)."""
-
 import hashlib
 import hmac
 import json

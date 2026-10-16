@@ -1,6 +1,4 @@
-"""Outgoing email over SMTP.
-
-In development every message lands in Mailpit (http://localhost:8026) instead of a
+"""In development every message lands in Mailpit (http://localhost:8026) instead of a
 real inbox. In production, point the SMTP_* settings at your email provider.
 """
 

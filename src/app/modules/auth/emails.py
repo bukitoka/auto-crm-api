@@ -1,5 +1,3 @@
-"""Emails sent by the auth module."""
-
 from html import escape
 
 from app.core.config import settings

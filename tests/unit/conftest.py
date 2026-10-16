@@ -65,6 +65,7 @@ def make_user(**overrides: Any) -> User:
         "full_name": "Uma User",
         "role": UserRole.MEMBER,
         "is_active": True,
+        "is_super_admin": False,
         "created_at": NOW,
         "updated_at": NOW,
     }

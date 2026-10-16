@@ -1,5 +1,6 @@
 import uuid
 
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
@@ -14,8 +15,13 @@ from app.modules.companies.schemas import (
 )
 from app.modules.users.models import User
 from app.modules.users.repository import UserRepository
+from app.shared.csv_files import ImportResult, to_csv, validation_message
 from app.shared.images import replace_image
 from app.shared.pagination import Page, PageParams
+
+# CSV columns: these map 1:1 to `CompanyCreate` fields, the rest are export-only.
+_PLAIN_FIELDS = ["name", "domain", "industry", "size", "website", "notes"]
+CSV_COLUMNS = [*_PLAIN_FIELDS, "owner", "created_at"]
 
 
 class CompanyService:
@@ -34,6 +40,38 @@ class CompanyService:
     async def list_page(self, filters: CompanyFilters, params: PageParams) -> Page[CompanyRead]:
         items, total = await self.repo.list_page(filters, offset=params.offset, limit=params.size)
         return Page[CompanyRead].from_items(items, total, params)
+
+    async def export_csv(self, filters: CompanyFilters) -> str:
+        companies = await self.repo.list_all(filters)
+        return to_csv(
+            CSV_COLUMNS,
+            (
+                [
+                    *(getattr(company, field) for field in _PLAIN_FIELDS),
+                    company.owner.full_name if company.owner else None,
+                    company.created_at.isoformat(),
+                ]
+                for company in companies
+            ),
+        )
+
+    async def import_csv(
+        self, rows: list[tuple[int, dict[str, str]]], *, user: User
+    ) -> ImportResult:
+        """Create a company per row; invalid rows and names that already exist are skipped."""
+        result = ImportResult()
+        for number, row in rows:
+            try:
+                data = CompanyCreate.model_validate({f: row[f] for f in _PLAIN_FIELDS if f in row})
+            except ValidationError as exc:
+                result.skip(number, validation_message(exc))
+                continue
+            if await self.repo.get_by_name(data.name) is not None:
+                result.skip(number, "A company with this name already exists")
+                continue
+            await self.create(data, user=user)
+            result.created += 1
+        return result
 
     async def create(self, data: CompanyCreate, *, user: User) -> Company:
         await self._check_owner(data.owner_id)

@@ -1,10 +1,11 @@
 import uuid
 
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import events
 from app.core.events import Event
-from app.core.exceptions import ConflictError, NotFoundError
+from app.core.exceptions import AppError, ConflictError, NotFoundError
 from app.core.storage import Storage, get_storage
 from app.modules.companies.repository import CompanyRepository
 from app.modules.contacts.models import Contact
@@ -17,8 +18,14 @@ from app.modules.contacts.schemas import (
 )
 from app.modules.users.models import User
 from app.modules.users.repository import UserRepository
+from app.shared.csv_files import ImportResult, to_csv, validation_message
 from app.shared.images import replace_image
 from app.shared.pagination import Page, PageParams
+
+# CSV columns: these map 1:1 to `ContactCreate` fields, the rest are handled below.
+# Unknown columns are ignored on import, so an export can be imported again.
+_PLAIN_FIELDS = ["first_name", "last_name", "email", "phone", "job_title", "status", "source"]
+CSV_COLUMNS = [*_PLAIN_FIELDS, "tags", "company", "owner", "ai_score", "created_at"]
 
 
 class ContactService:
@@ -38,6 +45,45 @@ class ContactService:
     async def list_page(self, filters: ContactFilters, params: PageParams) -> Page[ContactRead]:
         items, total = await self.repo.list_page(filters, offset=params.offset, limit=params.size)
         return Page[ContactRead].from_items(items, total, params)
+
+    async def export_csv(self, filters: ContactFilters) -> str:
+        contacts = await self.repo.list_all(filters)
+        return to_csv(
+            CSV_COLUMNS,
+            (
+                [
+                    *(getattr(contact, field) for field in _PLAIN_FIELDS),
+                    "; ".join(contact.tags),
+                    contact.company.name if contact.company else None,
+                    contact.owner.full_name if contact.owner else None,
+                    contact.ai_score,
+                    contact.created_at.isoformat(),
+                ]
+                for contact in contacts
+            ),
+        )
+
+    async def import_csv(
+        self, rows: list[tuple[int, dict[str, str]]], *, user: User
+    ) -> ImportResult:
+        """Create a contact per row; rows that are invalid or duplicate an email are skipped."""
+        result = ImportResult()
+        for number, row in rows:
+            values: dict = {field: row[field] for field in _PLAIN_FIELDS if field in row}
+            if "tags" in row:
+                values["tags"] = [tag.strip() for tag in row["tags"].split(";") if tag.strip()]
+            if "company" in row:  # unknown company names are left unlinked
+                company = await self.companies.get_by_name(row["company"])
+                values["company_id"] = company.id if company else None
+            try:
+                await self.create(ContactCreate.model_validate(values), user=user)
+            except ValidationError as exc:
+                result.skip(number, validation_message(exc))
+            except AppError as exc:
+                result.skip(number, exc.message)
+            else:
+                result.created += 1
+        return result
 
     async def create(self, data: ContactCreate, *, user: User) -> Contact:
         values = data.model_dump()

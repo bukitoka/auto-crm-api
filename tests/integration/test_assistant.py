@@ -1,5 +1,3 @@
-"""The assistant over HTTP: saved conversations, and a scripted AI that "calls" tools for real."""
-
 import json
 from collections.abc import Callable
 from typing import Any, ClassVar
@@ -14,6 +12,7 @@ from app.core.exceptions import AIResponseError
 from app.main import app
 from app.modules.ai.dependencies import get_ai_client
 from app.modules.ai.schemas import EmailDraft, ExtractedContact, LeadScore, TimelineSummary
+from app.modules.assistant import speech
 from app.modules.assistant.service import MAX_STEPS
 from tests.fakes import FakeMailer
 from tests.integration.conftest import register_and_login
@@ -607,3 +606,149 @@ async def test_task_questions_see_the_whole_team_like_the_dashboard(
     assert "error" in unknown
     assert dashboard["overdue_tasks_all_users"] == 2
     assert len(dashboard["overdue_task_list"]) == 2
+
+
+# --- Attached files ---
+
+CARD = ("card.txt", b"Jane Doe\nCTO, Initech\njane@initech.io", "text/plain")
+EMAIL = (
+    "intro.eml",
+    b"From: Bob <bob@globex.com>\nSubject: Intro\n\nLet's meet next week.",
+    "message/rfc822",
+)
+
+
+async def test_attached_files_are_read_for_the_model(
+    client: AsyncClient, admin_headers: dict[str, str], ai: ScriptedAI
+) -> None:
+    ai.script = [
+        calls(("create_contact", {"first_name": "Jane", "email": "jane@initech.io"})),
+        says("Added Jane Doe."),
+        says("Bob wants to meet."),
+    ]
+
+    response = await client.post(
+        f"{URL}/with-files",
+        data={"content": "Add this person"},
+        files=[("files", CARD), ("files", EMAIL)],
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 201, response.text
+    question, answer = response.json()["messages"]
+    assert question["content"] == "Add this person"
+    assert question["attachments"] == [{"name": "card.txt"}, {"name": "intro.eml"}]
+    assert answer["actions"][0]["label"] == "Contact: Jane"
+    # The model got the text of each file, clearly delimited, after the user's words.
+    system, user = ai.requests[0][:2]
+    assert "[Attached file: name]" in system["content"]
+    assert user["content"].startswith("Add this person\n\n[Attached file: card.txt]\nJane Doe")
+    assert "[End of attached file: card.txt]" in user["content"]
+    assert "Subject: Intro" in user["content"]
+    assert "Let's meet next week." in user["content"]
+
+    # A later message (plain JSON) still lets the model see the files.
+    chat = response.json()["conversation"]["id"]
+    later = await client.post(
+        f"{URL}/{chat}/messages", json=message("What does Bob want?"), headers=admin_headers
+    )
+    assert later.status_code == 200
+    assert "Let's meet next week." in ai.requests[-1][1]["content"]
+    assert later.json()["messages"][0]["attachments"] == []
+    detail = (await client.get(f"{URL}/{chat}", headers=admin_headers)).json()
+    assert detail["messages"][0]["attachments"] == [{"name": "card.txt"}, {"name": "intro.eml"}]
+
+
+async def test_files_without_text_and_with_page_context(
+    client: AsyncClient, admin_headers: dict[str, str], ai: ScriptedAI
+) -> None:
+    ai.script = [says("A business card."), says("Logged.")]
+    turn = await start(client, admin_headers)
+    contact = (
+        await client.post("/api/v1/contacts", json={"first_name": "Bob"}, headers=admin_headers)
+    ).json()
+
+    response = await client.post(
+        f"{URL}/{turn['conversation']['id']}/messages/with-files",
+        data={"context_type": "contact", "context_id": contact["id"]},
+        files=[("files", EMAIL)],
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["messages"][0]["content"] == ""
+    system, *_, user = ai.requests[-1]
+    assert contact["id"] in system["content"]
+    assert user["content"].startswith("[Attached file: intro.eml]")
+
+    first = await client.post(f"{URL}/with-files", files=[("files", CARD)], headers=admin_headers)
+    assert first.json()["conversation"]["title"] == "card.txt"
+
+
+async def test_attachment_validation(
+    client: AsyncClient, admin_headers: dict[str, str], ai: ScriptedAI
+) -> None:
+    too_many = await client.post(
+        f"{URL}/with-files", files=[("files", CARD)] * 4, headers=admin_headers
+    )
+    assert too_many.status_code == 400
+    unsupported = await client.post(
+        f"{URL}/with-files",
+        files=[("files", ("data.zip", b"PK", "application/zip"))],
+        headers=admin_headers,
+    )
+    assert unsupported.status_code == 400
+    assert unsupported.json()["detail"].startswith("data.zip: Unsupported file")
+    no_files = await client.post(f"{URL}/with-files", data={"content": "Hi"}, headers=admin_headers)
+    assert no_files.status_code == 422
+    assert ai.requests == []
+    assert (await client.get(URL, headers=admin_headers)).json()["total"] == 0
+
+
+# --- Voice input ---
+
+
+async def test_transcribe_returns_the_text(
+    client: AsyncClient, member_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    received: list[bytes] = []
+
+    def fake_transcribe(data: bytes) -> str:
+        received.append(data)
+        return "Call Dana tomorrow"
+
+    monkeypatch.setattr(speech, "transcribe_audio", fake_transcribe)
+    response = await client.post(
+        "/api/v1/assistant/transcribe",
+        files={"audio": ("voice.webm", b"recording", "audio/webm")},
+        headers=member_headers,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {"text": "Call Dana tomorrow"}
+    assert received == [b"recording"]
+
+
+async def test_transcribe_rejects_bad_audio(
+    client: AsyncClient, member_headers: dict[str, str]
+) -> None:
+    url = "/api/v1/assistant/transcribe"
+    unreadable = await client.post(
+        url, files={"audio": ("voice.webm", b"noise" * 10, "audio/webm")}, headers=member_headers
+    )
+    assert unreadable.status_code == 400
+    assert "could not be read" in unreadable.text
+
+    empty = await client.post(
+        url, files={"audio": ("voice.webm", b"", "audio/webm")}, headers=member_headers
+    )
+    assert empty.status_code == 400
+
+    missing = await client.post(url, headers=member_headers)
+    assert missing.status_code == 422
+
+
+async def test_transcribe_needs_a_login(client: AsyncClient) -> None:
+    response = await client.post(
+        "/api/v1/assistant/transcribe", files={"audio": ("voice.webm", b"x", "audio/webm")}
+    )
+    assert response.status_code == 401

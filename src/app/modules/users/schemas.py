@@ -13,6 +13,7 @@ class UserRead(ORMModel):
     full_name: str
     role: UserRole
     is_active: bool
+    is_super_admin: bool
     avatar_url: ImageUrl = Field(default=None, validation_alias="avatar_key")
     created_at: datetime
     updated_at: datetime

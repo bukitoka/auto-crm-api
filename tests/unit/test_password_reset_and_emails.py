@@ -1,5 +1,3 @@
-"""Password reset (tokens + AuthService), emailing contacts, and image methods of services."""
-
 from unittest.mock import AsyncMock
 
 import pytest

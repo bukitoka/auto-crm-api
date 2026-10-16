@@ -1,7 +1,4 @@
-"""Image uploads, emailing contacts and the password reset flow over HTTP.
-
-Storage and SMTP are the in-memory fakes from `tests/fakes.py` (see conftest).
-"""
+"""Storage and SMTP are the in-memory fakes from `tests/fakes.py` (see conftest)."""
 
 import io
 import re

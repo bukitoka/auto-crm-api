@@ -1,5 +1,3 @@
-"""Shared pagination: query params dependency and the `Page[T]` response schema."""
-
 from collections.abc import Sequence
 from typing import Annotated, Any, Self
 

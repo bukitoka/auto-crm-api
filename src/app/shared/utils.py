@@ -1,5 +1,3 @@
-"""Small helpers shared by repositories and services."""
-
 from datetime import UTC, date, datetime
 
 

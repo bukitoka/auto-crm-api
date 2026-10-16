@@ -1,10 +1,12 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.modules.contacts.models import ContactStatus
 from app.shared.schemas import CompanyRef, ImageUrl, ORMModel, UserRef, reject_null
+from app.shared.sorting import SortOrder
 
 
 class ContactCreate(BaseModel):
@@ -40,6 +42,8 @@ class ContactFilters(BaseModel):
     status: ContactStatus | None = None
     company_id: uuid.UUID | None = None
     owner_id: uuid.UUID | None = None
+    sort: Literal["name", "email", "status", "company", "ai_score", "created_at"] | None = None
+    order: SortOrder = SortOrder.ASC
 
 
 class ContactRead(ORMModel):

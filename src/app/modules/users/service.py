@@ -3,7 +3,12 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
+from app.core.exceptions import (
+    BadRequestError,
+    ConflictError,
+    NotFoundError,
+    PermissionDeniedError,
+)
 from app.core.security import hash_password
 from app.core.storage import Storage, get_storage
 from app.modules.users.models import User, UserRole
@@ -36,17 +41,46 @@ class UserService:
         return Page[UserRead].from_items(items, total, params)
 
     async def create(self, *, email: str, password: str, full_name: str) -> User:
-        """Create a user. The first (human) user becomes an admin."""
+        """Create a team member. The super admin decides who becomes an admin."""
+        if not await self.repo.super_admin_exists():
+            raise PermissionDeniedError("Finish setting up the workspace first")
+        return await self._create(email, password, full_name, role=UserRole.MEMBER)
+
+    async def setup(self, *, email: str, password: str, full_name: str) -> User:
+        """Create the first super admin. Works only once, on a workspace without one."""
+        if await self.repo.super_admin_exists():
+            raise ConflictError("The workspace is already set up")
+        return await self.create_super_admin(email=email, password=password, full_name=full_name)
+
+    async def create_super_admin(self, *, email: str, password: str, full_name: str) -> User:
+        return await self._create(email, password, full_name, role=UserRole.ADMIN, super_admin=True)
+
+    async def set_password(self, email: str, password: str) -> User:
+        user = await self.repo.get_by_email(email)
+        if user is None or user.email == SERVICE_ACCOUNT_EMAIL:
+            raise NotFoundError("User not found")
+        user.hashed_password = hash_password(password)
+        await self.session.commit()
+        return user
+
+    async def _create(
+        self,
+        email: str,
+        password: str,
+        full_name: str,
+        *,
+        role: UserRole,
+        super_admin: bool = False,
+    ) -> User:
         email = email.lower()
         if await self.repo.get_by_email(email):
             raise ConflictError("A user with this email already exists")
-
-        is_first_user = await self.repo.count_excluding(SERVICE_ACCOUNT_EMAIL) == 0
         user = User(
             email=email,
             hashed_password=hash_password(password),
             full_name=full_name,
-            role=UserRole.ADMIN if is_first_user else UserRole.MEMBER,
+            role=role,
+            is_super_admin=super_admin,
         )
         await self.repo.add(user)
         await self.session.commit()
@@ -54,12 +88,23 @@ class UserService:
 
     async def update(self, user_id: uuid.UUID, data: UserUpdate, *, acting_user: User) -> User:
         user = await self.get(user_id)
+        if user.is_super_admin:
+            # Not part of the team, so not managed from the Team page.
+            raise NotFoundError("User not found")
         changes = data.model_dump(exclude_unset=True, exclude_none=True)
 
-        if user.id == acting_user.id and (
-            changes.get("role") == UserRole.MEMBER or changes.get("is_active") is False
+        new_role = changes.get("role", user.role)
+        role_changed = new_role != user.role
+        demotes_or_deactivates = role_changed or changes.get("is_active") is False
+
+        if user.id == acting_user.id and demotes_or_deactivates:
+            raise BadRequestError("You cannot change your own role or deactivate yourself")
+        # Admins manage members; only the super admin can touch other admins or make someone admin.
+        if not acting_user.is_super_admin and (
+            (user.role == UserRole.ADMIN and user.id != acting_user.id)
+            or (role_changed and new_role == UserRole.ADMIN)
         ):
-            raise BadRequestError("You cannot demote or deactivate yourself")
+            raise PermissionDeniedError("Only the super admin can manage admins")
 
         for field, value in changes.items():
             setattr(user, field, value)

@@ -1,5 +1,3 @@
-"""Smart capture: turning uploaded files into text (OCR, PDF, Word, email, plain text)."""
-
 import io
 
 import docx
