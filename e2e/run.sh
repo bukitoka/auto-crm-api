@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # End-to-end tests with Newman:
 #   fresh `auto_crm_e2e` database -> migrations -> API on :8001 -> Postman collection.
-# The dev database (auto_crm) and bucket (auto-crm) are never touched; emails go to
-# the same Mailpit as development (http://localhost:8026), tagged with a per-run id. Exit code = Newman's exit code.
+# The dev database (auto_crm) and bucket (auto-crm) are never touched; no email is sent.
+# Exit code = Newman's exit code.
 set -euo pipefail
 
 cd "$(dirname "$0")/.." # the API repo root
@@ -21,8 +21,8 @@ E2E_DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:${POSTGRES_PO
 
 mkdir -p "$RESULTS_DIR"
 
-echo "==> Starting Postgres, MinIO and Mailpit (docker compose)"
-docker compose up -d --wait postgres minio mailpit
+echo "==> Starting Postgres and MinIO (docker compose)"
+docker compose up -d --wait postgres minio
 
 echo "==> Recreating database ${E2E_DB}"
 docker exec "$PG_CONTAINER" psql -U postgres -q -c "DROP DATABASE IF EXISTS ${E2E_DB} WITH (FORCE)"

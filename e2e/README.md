@@ -9,7 +9,7 @@ second admin gets 404 on the first admin's records.
 ./e2e/run.sh
 ```
 
-The script starts Postgres, MinIO and Mailpit, creates a fresh `auto_crm_e2e` database, runs the
+The script starts Postgres and MinIO, creates a fresh `auto_crm_e2e` database, runs the
 API on port 8001 and runs the collection with Newman. Your dev database and files are never
 touched. You need Docker, uv and Bun, and port 8001 must be free.
 
