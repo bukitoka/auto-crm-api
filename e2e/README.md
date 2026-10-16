@@ -1,8 +1,9 @@
 # End-to-end tests
 
-A Postman collection that goes through the whole API the way a user would: register, add
-companies and contacts, move deals, finish tasks, upload images, reset a password by email, and
-clean up at the end.
+A Postman collection that goes through the whole API the way users would: set up the super admin, create an admin, log in as that admin,
+add companies and contacts, move deals, finish tasks, upload images, reset a password by email, and
+clean up at the end. It also checks that the super admin gets 403 on CRM writes and that a
+second admin gets 404 on the first admin's records.
 
 ```bash
 ./e2e/run.sh

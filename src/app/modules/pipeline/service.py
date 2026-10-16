@@ -2,6 +2,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.access import unscoped
 from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.modules.deals.service import DealService
 from app.modules.pipeline.models import PipelineStage
@@ -79,8 +80,9 @@ class PipelineService:
             await self._get(move_to)
             # One by one through DealService so closed_at and stage events behave as usual.
             deals = DealService(self.session)
-            for deal_id in deal_ids:
-                await deals.change_stage(deal_id, move_to)
+            with unscoped(self.session):
+                for deal_id in deal_ids:
+                    await deals.change_stage(deal_id, move_to)
 
         await self.repo.delete(stage)
         await self.session.commit()

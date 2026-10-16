@@ -7,6 +7,7 @@ webhook events) as the web app. Handlers return small JSON-friendly dicts for th
 To add a tool: write a params model, an async handler, and add a `Tool(...)` to `TOOLS`.
 """
 
+import secrets
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -14,11 +15,11 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.email import Mailer
-from app.core.exceptions import NotFoundError, PermissionDeniedError
+from app.core.exceptions import NotFoundError
 from app.modules.activities.models import Activity, ActivityType
 from app.modules.activities.schemas import ActivityCreate, ActivityFilters, ActivityRead
 from app.modules.activities.service import ActivityService
@@ -48,7 +49,8 @@ from app.modules.tasks.models import Task, TaskPriority, TaskStatus
 from app.modules.tasks.schemas import TaskCreate, TaskFilters, TaskRead, TaskUpdate
 from app.modules.tasks.service import TaskService
 from app.modules.users.models import User
-from app.modules.users.service import SERVICE_ACCOUNT_EMAIL, UserService
+from app.modules.users.schemas import AdminCreate, UserUpdate
+from app.modules.users.service import UserService
 from app.modules.webhooks.service import WebhookService
 from app.shared.pagination import PageParams
 
@@ -79,6 +81,24 @@ class ToolContext:
         self.webhooks = WebhookService(self.session)
 
 
+READ_TOOLS = frozenset(
+    {
+        "search_contacts",
+        "search_companies",
+        "search_deals",
+        "get_contact",
+        "get_deal",
+        "get_company",
+        "list_tasks",
+        "list_pipeline_stages",
+        "list_users",
+        "get_dashboard_summary",
+        "list_activities",
+        "summarize_timeline",
+    }
+)
+SUPERVISOR_TOOLS = frozenset({"list_automations", "create_admin", "set_admin_active"})
+
 Handler = Callable[[ToolContext, Any], Awaitable[dict[str, Any]]]
 
 
@@ -88,6 +108,18 @@ class Tool:
     description: str
     params: type[BaseModel]
     handler: Handler
+
+    @property
+    def access(self) -> str:
+        """Who may use it: "read" (everyone), "supervisor" (super admin only) or "work" (admins)."""
+        if self.name in SUPERVISOR_TOOLS:
+            return "supervisor"
+        return "read" if self.name in READ_TOOLS else "work"
+
+    def allowed_for(self, user: User) -> bool:
+        if user.is_super_admin:
+            return self.access != "work"
+        return self.access != "supervisor"
 
     def spec(self) -> dict[str, Any]:
         """The OpenAI/DeepSeek function-calling definition."""
@@ -101,7 +133,6 @@ class Tool:
         }
 
 
-# --- Compact views for the model (only what it needs to answer and to call other tools) ---
 # They accept ORM objects (from `service.get/create`) and schemas (from `service.list_page`).
 
 
@@ -189,14 +220,13 @@ def _link_for(contact_id: uuid.UUID | None, deal_id: uuid.UUID | None) -> dict[s
     return {}
 
 
-# --- Read tools ---
-
-
 class SearchContactsParams(BaseModel):
     query: str | None = Field(default=None, description="Name, email or phone; omit to list all")
     status: ContactStatus | None = None
     company_id: uuid.UUID | None = None
-    owner_id: uuid.UUID | None = Field(default=None, description="A teammate from list_users")
+    owner_id: uuid.UUID | None = Field(
+        default=None, description="Your own user id (records stay with you)"
+    )
 
 
 async def search_contacts(ctx: ToolContext, params: SearchContactsParams) -> dict[str, Any]:
@@ -221,7 +251,9 @@ class SearchDealsParams(BaseModel):
     stage_name: str | None = Field(default=None, description="Only deals in this stage")
     contact_id: uuid.UUID | None = None
     company_id: uuid.UUID | None = None
-    owner_id: uuid.UUID | None = Field(default=None, description="A teammate from list_users")
+    owner_id: uuid.UUID | None = Field(
+        default=None, description="Your own user id (records stay with you)"
+    )
 
 
 async def search_deals(ctx: ToolContext, params: SearchDealsParams) -> dict[str, Any]:
@@ -285,8 +317,8 @@ class ListTasksParams(BaseModel):
     search: str | None = Field(default=None, description="Words in the task title")
     assignee: str = Field(
         default="all",
-        description='"all" (whole team, like the dashboard), "me" (the current user) '
-        "or a teammate's user id from list_users",
+        description='"all" (everything you can see), "me" (the current user) '
+        "or an admin's user id from list_users",
     )
     overdue_only: bool = False
     include_done: bool = False
@@ -326,16 +358,13 @@ async def list_pipeline_stages(ctx: ToolContext, _: NoParams) -> dict[str, Any]:
     return {"stages": [s.name for s in stages]}
 
 
-# --- Write tools ---
-
-
 class CreateTaskParams(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     description: str | None = None
     due_date: date | None = Field(default=None, description="YYYY-MM-DD")
     priority: TaskPriority = TaskPriority.MEDIUM
     assignee_id: uuid.UUID | None = Field(
-        default=None, description="A teammate from list_users; defaults to the current user"
+        default=None, description="Your own user id; defaults to the current user"
     )
     contact_id: uuid.UUID | None = None
     deal_id: uuid.UUID | None = None
@@ -536,19 +565,46 @@ async def move_deal(ctx: ToolContext, params: MoveDealParams) -> dict[str, Any]:
     return {"moved_deal": _deal_view(deal)}
 
 
-# --- Team, reports and automations ---
-
-
 async def list_users(ctx: ToolContext, _: NoParams) -> dict[str, Any]:
-    page = await ctx.users.list_page(_page(100), None)
+    page = await ctx.users.list_page(_page(100), None, viewer=ctx.user)
     return {
         "users": [
-            {"id": str(u.id), "name": u.full_name, "email": u.email, "role": u.role}
+            {
+                "id": str(u.id),
+                "name": u.full_name,
+                "email": u.email,
+                "active": u.is_active,
+            }
             for u in page.items
-            if u.is_active and u.email != SERVICE_ACCOUNT_EMAIL
         ],
         "current_user_id": str(ctx.user.id),
     }
+
+
+class CreateAdminParams(BaseModel):
+    email: EmailStr
+    full_name: str = Field(min_length=1, max_length=200)
+
+
+async def create_admin(ctx: ToolContext, params: CreateAdminParams) -> dict[str, Any]:
+    password = secrets.token_urlsafe(12)
+    admin = await ctx.users.create_admin(
+        AdminCreate(email=params.email, password=password, full_name=params.full_name)
+    )
+    return {
+        "created_admin": {"id": str(admin.id), "name": admin.full_name, "email": admin.email},
+        "temporary_password": password,
+    }
+
+
+class SetAdminActiveParams(BaseModel):
+    user_id: uuid.UUID = Field(description="An admin from list_users")
+    active: bool
+
+
+async def set_admin_active(ctx: ToolContext, params: SetAdminActiveParams) -> dict[str, Any]:
+    admin = await ctx.users.update(params.user_id, UserUpdate(is_active=params.active))
+    return {"admin": {"id": str(admin.id), "name": admin.full_name, "active": admin.is_active}}
 
 
 async def get_dashboard_summary(ctx: ToolContext, _: NoParams) -> dict[str, Any]:
@@ -562,10 +618,10 @@ async def get_dashboard_summary(ctx: ToolContext, _: NoParams) -> dict[str, Any]
         "win_rate_last_90_days": summary.win_rate,
         "average_won_deal_size_last_90_days": summary.average_deal_size,
         "new_leads_this_month": summary.new_leads_this_month,
-        "overdue_tasks_all_users": summary.overdue_tasks,
+        "overdue_tasks": summary.overdue_tasks,
         "overdue_task_list": [_task_view(t) for t in overdue.items],
-        "tasks_due_today_all_users": summary.tasks_due_today,
-        "tasks_due_next_7_days_all_users": summary.tasks_due_this_week,
+        "tasks_due_today": summary.tasks_due_today,
+        "tasks_due_next_7_days": summary.tasks_due_this_week,
         "pipeline_by_stage": [
             {"stage": s.stage_name, "deals": s.deal_count, "value": s.total_value}
             for s in summary.pipeline_by_stage
@@ -600,8 +656,6 @@ async def list_activities(ctx: ToolContext, params: ActivityListParams) -> dict[
 
 
 async def list_automations(ctx: ToolContext, _: NoParams) -> dict[str, Any]:
-    if not ctx.user.is_admin:
-        raise PermissionDeniedError("Only admins can see automations")
     page = await ctx.webhooks.list_page(_page(50))
     return {
         "webhook_subscriptions": [
@@ -611,9 +665,6 @@ async def list_automations(ctx: ToolContext, _: NoParams) -> dict[str, Any]:
     }
 
 
-# --- More updates ---
-
-
 class UpdateDealParams(BaseModel):
     deal_id: uuid.UUID
     title: str | None = Field(default=None, min_length=1, max_length=200)
@@ -621,7 +672,9 @@ class UpdateDealParams(BaseModel):
     expected_close_date: date | None = None
     contact_id: uuid.UUID | None = None
     company_id: uuid.UUID | None = None
-    owner_id: uuid.UUID | None = Field(default=None, description="A teammate from list_users")
+    owner_id: uuid.UUID | None = Field(
+        default=None, description="Your own user id (records stay with you)"
+    )
 
 
 async def update_deal(ctx: ToolContext, params: UpdateDealParams) -> dict[str, Any]:
@@ -657,9 +710,6 @@ async def update_company(ctx: ToolContext, params: UpdateCompanyParams) -> dict[
         )
     )
     return {"updated_company": _company_view(company)}
-
-
-# --- AI features and email ---
 
 
 async def score_contact(ctx: ToolContext, params: ContactIdParams) -> dict[str, Any]:
@@ -759,7 +809,7 @@ _TOOL_LIST = [
     ),
     Tool(
         "list_tasks",
-        "List open tasks for the whole team (default), the current user or a teammate; "
+        "List open tasks you can see (default), the current user's or one admin's; "
         "optionally overdue only or including done tasks.",
         ListTasksParams,
         list_tasks,
@@ -772,15 +822,15 @@ _TOOL_LIST = [
     ),
     Tool(
         "list_users",
-        "Team members (to assign tasks/deals) and the current user's id.",
+        "The admin accounts you can see and the current user's id.",
         NoParams,
         list_users,
     ),
     Tool(
         "get_dashboard_summary",
         "Same numbers as the dashboard: pipeline value, won/lost this month, win rate, average "
-        "deal size, new leads, overdue and due tasks (whole team, with the list), deals per "
-        "stage, deals closing soon, leads by status, activity counts, team leaderboard, my "
+        "deal size, new leads, overdue and due tasks (with the list), deals per "
+        "stage, deals closing soon, leads by status, activity counts, admin leaderboard, my "
         "tasks, recent activities.",
         NoParams,
         get_dashboard_summary,
@@ -793,9 +843,21 @@ _TOOL_LIST = [
     ),
     Tool(
         "list_automations",
-        "Admin only: the n8n webhook subscriptions (automations).",
+        "Super admin only: the n8n webhook subscriptions (automations).",
         NoParams,
         list_automations,
+    ),
+    Tool(
+        "create_admin",
+        "Super admin only: create an admin account. Returns a temporary password to hand over.",
+        CreateAdminParams,
+        create_admin,
+    ),
+    Tool(
+        "set_admin_active",
+        "Super admin only: activate or deactivate an admin account.",
+        SetAdminActiveParams,
+        set_admin_active,
     ),
     Tool("create_task", "Create a task / follow-up / reminder.", CreateTaskParams, create_task),
     Tool("complete_task", "Mark a task as done.", TaskIdParams, complete_task),
@@ -867,4 +929,7 @@ _TOOL_LIST = [
 
 TOOLS: dict[str, Tool] = {tool.name: tool for tool in _TOOL_LIST}
 
-TOOL_SPECS = [tool.spec() for tool in TOOLS.values()]
+
+def tool_specs_for(user: User) -> list[dict[str, Any]]:
+    """The tools this user's assistant may call: admins do CRM work, the super admin supervises."""
+    return [tool.spec() for tool in TOOLS.values() if tool.allowed_for(user)]

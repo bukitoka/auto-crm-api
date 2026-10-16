@@ -1,10 +1,10 @@
 import uuid
 
-from fastapi import APIRouter, UploadFile
+from fastapi import APIRouter, UploadFile, status
 
-from app.modules.auth.dependencies import AdminUser, CurrentUser
+from app.modules.auth.dependencies import CurrentUser, SuperAdminUser
 from app.modules.users.dependencies import UserServiceDep
-from app.modules.users.schemas import UserRead, UserUpdate
+from app.modules.users.schemas import AdminCreate, UserRead, UserUpdate
 from app.shared.images import read_image
 from app.shared.pagination import Page, PageParamsDep
 
@@ -14,11 +14,17 @@ router = APIRouter(prefix="/users", tags=["users"])
 @router.get("", response_model=Page[UserRead])
 async def list_users(
     service: UserServiceDep,
-    _: CurrentUser,
+    user: CurrentUser,
     params: PageParamsDep,
     search: str | None = None,
 ):
-    return await service.list_page(params, search)
+    return await service.list_page(params, search, viewer=user)
+
+
+@router.post("", response_model=UserRead, status_code=status.HTTP_201_CREATED)
+async def create_admin(data: AdminCreate, service: UserServiceDep, _: SuperAdminUser):
+    """Create an admin account. Only the super admin can."""
+    return await service.create_admin(data)
 
 
 @router.put("/me/avatar", response_model=UserRead)
@@ -34,6 +40,7 @@ async def delete_my_avatar(service: UserServiceDep, user: CurrentUser):
 
 @router.patch("/{user_id}", response_model=UserRead)
 async def update_user(
-    user_id: uuid.UUID, data: UserUpdate, service: UserServiceDep, admin: AdminUser
+    user_id: uuid.UUID, data: UserUpdate, service: UserServiceDep, _: SuperAdminUser
 ):
-    return await service.update(user_id, data, acting_user=admin)
+    """Rename an admin or switch the account on or off. Only the super admin can."""
+    return await service.update(user_id, data)

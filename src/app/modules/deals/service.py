@@ -3,6 +3,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import events
+from app.core.access import ensure_own
 from app.core.events import Event
 from app.core.exceptions import ConflictError, NotFoundError
 from app.modules.companies.repository import CompanyRepository
@@ -145,6 +146,7 @@ class DealService:
             raise NotFoundError("Contact not found")
         if values.get("company_id") and not await self.companies.exists(values["company_id"]):
             raise NotFoundError("Company not found")
+        ensure_own(self.session, values.get("owner_id"))
         if values.get("owner_id") and await self.users.get(values["owner_id"]) is None:
             raise NotFoundError("Owner not found")
 

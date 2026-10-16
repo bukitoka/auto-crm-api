@@ -3,23 +3,14 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import (
-    BadRequestError,
-    ConflictError,
-    NotFoundError,
-    PermissionDeniedError,
-)
+from app.core.exceptions import ConflictError, NotFoundError
 from app.core.security import hash_password
 from app.core.storage import Storage, get_storage
-from app.modules.users.models import User, UserRole
+from app.modules.users.models import SERVICE_ACCOUNT_EMAIL, SERVICE_ACCOUNT_NAME, User, UserRole
 from app.modules.users.repository import UserRepository
-from app.modules.users.schemas import UserRead, UserUpdate
+from app.modules.users.schemas import AdminCreate, UserRead, UserUpdate
 from app.shared.images import replace_image
 from app.shared.pagination import Page, PageParams
-
-# The X-API-Key (n8n) acts as this user, so created records have an author.
-SERVICE_ACCOUNT_EMAIL = "automation@auto-crm.local"
-SERVICE_ACCOUNT_NAME = "Automation (n8n)"
 
 
 class UserService:
@@ -34,17 +25,20 @@ class UserService:
             raise NotFoundError("User not found")
         return user
 
-    async def list_page(self, params: PageParams, search: str | None) -> Page[UserRead]:
+    async def list_page(
+        self, params: PageParams, search: str | None, *, viewer: User
+    ) -> Page[UserRead]:
+        """The super admin sees every admin; an admin sees only themselves."""
         items, total = await self.repo.list_page(
-            search=search, offset=params.offset, limit=params.size
+            search=search,
+            only_id=None if viewer.is_super_admin else viewer.id,
+            offset=params.offset,
+            limit=params.size,
         )
         return Page[UserRead].from_items(items, total, params)
 
-    async def create(self, *, email: str, password: str, full_name: str) -> User:
-        """Create a team member. The super admin decides who becomes an admin."""
-        if not await self.repo.super_admin_exists():
-            raise PermissionDeniedError("Finish setting up the workspace first")
-        return await self._create(email, password, full_name, role=UserRole.MEMBER)
+    async def create_admin(self, data: AdminCreate) -> User:
+        return await self._create(data.email, data.password, data.full_name, role=UserRole.ADMIN)
 
     async def setup(self, *, email: str, password: str, full_name: str) -> User:
         """Create the first super admin. Works only once, on a workspace without one."""
@@ -86,26 +80,11 @@ class UserService:
         await self.session.commit()
         return user
 
-    async def update(self, user_id: uuid.UUID, data: UserUpdate, *, acting_user: User) -> User:
+    async def update(self, user_id: uuid.UUID, data: UserUpdate) -> User:
         user = await self.get(user_id)
-        if user.is_super_admin:
-            # Not part of the team, so not managed from the Team page.
+        if user.is_super_admin or user.email == SERVICE_ACCOUNT_EMAIL:
             raise NotFoundError("User not found")
         changes = data.model_dump(exclude_unset=True, exclude_none=True)
-
-        new_role = changes.get("role", user.role)
-        role_changed = new_role != user.role
-        demotes_or_deactivates = role_changed or changes.get("is_active") is False
-
-        if user.id == acting_user.id and demotes_or_deactivates:
-            raise BadRequestError("You cannot change your own role or deactivate yourself")
-        # Admins manage members; only the super admin can touch other admins or make someone admin.
-        if not acting_user.is_super_admin and (
-            (user.role == UserRole.ADMIN and user.id != acting_user.id)
-            or (role_changed and new_role == UserRole.ADMIN)
-        ):
-            raise PermissionDeniedError("Only the super admin can manage admins")
-
         for field, value in changes.items():
             setattr(user, field, value)
         await self.session.commit()
@@ -137,7 +116,7 @@ class UserService:
                 # Random, never shared: nobody can log in as the service account.
                 hashed_password=hash_password(secrets.token_urlsafe(32)),
                 full_name=SERVICE_ACCOUNT_NAME,
-                role=UserRole.MEMBER,
+                role=UserRole.ADMIN,
             )
             await self.repo.add(user)
             await self.session.commit()

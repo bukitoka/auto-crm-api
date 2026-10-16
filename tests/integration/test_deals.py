@@ -131,7 +131,10 @@ async def test_dashboard_summary(client: AsyncClient, admin_headers: dict[str, s
 
 
 async def test_dashboard_rates_lists_and_team(
-    client: AsyncClient, admin_headers: dict[str, str], member_headers: dict[str, str]
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    member_headers: dict[str, str],
+    super_admin_headers: dict[str, str],
 ) -> None:
     stages = await _stages(client, admin_headers)
     today = today_utc()
@@ -170,7 +173,7 @@ async def test_dashboard_rates_lists_and_team(
     assert summary["average_deal_size"] == 75
     assert (summary["tasks_due_today"], summary["tasks_due_this_week"]) == (1, 2)
     assert [t["title"] for t in summary["overdue_task_list"]] == ["Late"]
-    assert [d["id"] for d in summary["deals_closing_soon"]] == [soon["id"]]
+    assert summary["deals_closing_soon"] == []
     assert {r["status"]: r["count"] for r in summary["contacts_by_status"]}["lead"] == 1
     assert {r["type"]: r["count"] for r in summary["activities_last_30_days"]} == {
         "note": 0,
@@ -182,7 +185,12 @@ async def test_dashboard_rates_lists_and_team(
         (m["user"]["full_name"], m["open_deals_value"], m["won_this_month_value"], m["open_tasks"])
         for m in summary["team"]
     ]
-    assert team == [("Ada Admin", 1, 150, 3), ("Max Member", 300, 0, 0)]
+    assert team == [("Ada Admin", 1, 150, 3)]
+
+    boss = (await client.get("/api/v1/dashboard/summary", headers=super_admin_headers)).json()
+    assert [d["id"] for d in boss["deals_closing_soon"]] == [soon["id"]]
+    boss_team = [(m["user"]["full_name"], m["open_deals_value"]) for m in boss["team"]]
+    assert boss_team == [("Ada Admin", 1), ("Max Admin", 300)]
 
 
 async def test_deal_crud_and_filters(client: AsyncClient, admin_headers: dict[str, str]) -> None:

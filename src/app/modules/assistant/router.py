@@ -73,7 +73,7 @@ async def list_conversations(
     params: PageParamsDep,
     filters: Annotated[ConversationFilters, Query()],
 ):
-    """Your conversations, newest first. Admins can pass `scope=all` (and `user_id`)."""
+    """Your conversations, newest first. The super admin can pass `scope=all` (and `user_id`)."""
     return await service.list_page(filters, params, user=user)
 
 
@@ -105,7 +105,7 @@ async def start_conversation_with_files(
 
 @router.post("/bulk", response_model=BulkResult)
 async def bulk_update(data: BulkAction, service: ConversationServiceDep, user: CurrentUser):
-    """Archive, restore or delete several conversations (admins: anyone's)."""
+    """Archive, restore or delete several of your conversations."""
     return await service.bulk(data, user=user)
 
 
@@ -148,7 +148,6 @@ async def update_conversation(
     service: ConversationServiceDep,
     user: CurrentUser,
 ):
-    """Rename or archive / unarchive."""
     return await service.update(conversation_id, data, user=user)
 
 

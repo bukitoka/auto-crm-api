@@ -44,7 +44,8 @@ from app.modules.pipeline.repository import PipelineRepository
 from app.modules.tasks.models import TaskPriority, TaskStatus
 from app.modules.tasks.schemas import TaskCreate
 from app.modules.tasks.service import TaskService
-from app.modules.users.models import User, UserRole
+from app.modules.users.models import User
+from app.modules.users.schemas import AdminCreate
 from app.modules.users.service import SERVICE_ACCOUNT_EMAIL, UserService
 from app.modules.webhooks.schemas import WebhookCreate
 from app.modules.webhooks.service import WebhookService
@@ -52,13 +53,13 @@ from app.shared.utils import today_utc, utc_now
 
 RANDOM_SEED = 42
 
-ADMIN = ("admin@example.com", "admin12345", "Alex Admin")
-# Not a team member: owns nothing and is hidden from user lists.
+# The boss: sees every admin's data, owns nothing and is hidden from user lists.
 SUPER_ADMIN = ("superadmin@example.com", "superadmin12345", "Super Admin")
-MEMBERS = [
-    ("sarah@example.com", "member12345", "Sarah Chen"),
-    ("marco@example.com", "member12345", "Marco Rossi"),
-    ("priya@example.com", "member12345", "Priya Patel"),
+ADMINS = [
+    ("alex@example.com", "admin12345", "Alex Admin"),
+    ("sarah@example.com", "admin12345", "Sarah Chen"),
+    ("marco@example.com", "admin12345", "Marco Rossi"),
+    ("priya@example.com", "admin12345", "Priya Patel"),
 ]
 
 COMPANY_COUNT = 10
@@ -147,15 +148,14 @@ class Seeder:
 
     async def _create_users(self) -> list[User]:
         service = UserService(self.session)
-        # Sign-ups need a set-up workspace; keep a super admin made on the setup page.
+        # Keep a super admin made on the setup page.
         if not await service.repo.super_admin_exists():
             email, password, full_name = SUPER_ADMIN
             await service.create_super_admin(email=email, password=password, full_name=full_name)
         users = []
-        for email, password, full_name in [ADMIN, *MEMBERS]:
-            users.append(await service.create(email=email, password=password, full_name=full_name))
-        users[0].role = UserRole.ADMIN
-        await self.session.commit()
+        for email, password, full_name in ADMINS:
+            admin = AdminCreate(email=email, password=password, full_name=full_name)
+            users.append(await service.create_admin(admin))
         return users
 
     async def _create_companies(self, users: list[User]) -> list[Company]:
@@ -196,7 +196,8 @@ class Seeder:
                 source=SOURCES[index % len(SOURCES)],
                 tags=self.rng.sample(TAGS, k=self.rng.randint(0, 3)),
                 company_id=company.id if company else None,
-                owner_id=self.rng.choice(users).id,
+                # Records of one company stay with one admin, so nobody sees half a customer.
+                owner_id=company.owner_id if company else self.rng.choice(users).id,
             )
             contacts.append(await service.create(data, user=users[0]))
         return contacts
@@ -223,7 +224,7 @@ class Seeder:
                 stage_id=stage.id,
                 contact_id=contact.id,
                 company_id=contact.company_id,
-                owner_id=self.rng.choice(users).id,
+                owner_id=contact.owner_id,
                 expected_close_date=today_utc() + timedelta(days=self.rng.randint(7, 90)),
             )
             deals.append(await service.create(data, user=users[0]))
@@ -234,14 +235,16 @@ class Seeder:
     ) -> int:
         service = ActivityService(self.session)
         types = list(ActivityType)
+        owners = {user.id: user for user in users}
         for index in range(ACTIVITY_COUNT):
             activity_type = types[index % len(types)]
             # Half of the activities belong to a deal (and its contact), half to a contact only.
             if index % 2 == 0:
                 deal = self.rng.choice(deals)
-                contact_id, deal_id = deal.contact_id, deal.id
+                contact_id, deal_id, owner_id = deal.contact_id, deal.id, deal.owner_id
             else:
-                contact_id, deal_id = self.rng.choice(contacts).id, None
+                contact = self.rng.choice(contacts)
+                contact_id, deal_id, owner_id = contact.id, None, contact.owner_id
             data = ActivityCreate(
                 type=activity_type,
                 subject=self.rng.choice(ACTIVITY_SUBJECTS[activity_type]),
@@ -250,8 +253,10 @@ class Seeder:
                 contact_id=contact_id,
                 deal_id=deal_id,
             )
-            # The service sets created_by from the acting user.
-            await service.create(data, user=self.rng.choice(users))
+            # The service sets created_by from the acting user: the owner of the contact.
+            assert owner_id
+            owner = owners[owner_id]
+            await service.create(data, user=owner)
         return ACTIVITY_COUNT
 
     async def _create_tasks(
@@ -259,6 +264,7 @@ class Seeder:
     ) -> int:
         service = TaskService(self.session)
         priorities = list(TaskPriority)
+        owners = {user.id: user for user in users}
         for index in range(TASK_COUNT):
             # A fixed mix: 6 overdue, 8 done, the rest open and due soon (or without a date).
             if index < 6:
@@ -270,18 +276,21 @@ class Seeder:
                 due_in_days = self.rng.randint(0, 21)
             due_date = today_utc() + timedelta(days=due_in_days) if index % 10 != 9 else None
             deal = self.rng.choice(deals) if index % 3 == 0 else None
-            contact_id = deal.contact_id if deal else self.rng.choice(contacts).id
+            contact = self.rng.choice(contacts)
+            contact_id = deal.contact_id if deal else contact.id
+            assignee_id = deal.owner_id if deal else contact.owner_id
             data = TaskCreate(
                 title=self.rng.choice(TASK_TITLES),
                 description=self.fake.sentence(),
                 due_date=due_date,
                 priority=priorities[index % len(priorities)],
                 status=status,
-                assignee_id=users[index % len(users)].id,  # everyone, the admin included
+                assignee_id=assignee_id,
                 contact_id=contact_id,
                 deal_id=deal.id if deal else None,
             )
-            await service.create(data, user=self.rng.choice(users))
+            assert assignee_id
+            await service.create(data, user=owners[assignee_id])
         return TASK_COUNT
 
     async def _create_webhooks(self) -> int:
@@ -309,7 +318,7 @@ class Seeder:
 
 
 async def has_crm_data(session: AsyncSession) -> bool:
-    """True if any team member or company exists (the super admin may be set up first)."""
+    """True if any admin or company exists (the super admin may be set up first)."""
     users = await session.scalar(
         select(func.count())
         .select_from(User)
@@ -351,8 +360,7 @@ async def seed(*, reset: bool) -> int:
     print("\nLog in with:")
     for label, (email, password, _) in [
         ("super admin", SUPER_ADMIN),
-        ("admin      ", ADMIN),
-        *(("member     ", member) for member in MEMBERS),
+        *(("admin      ", admin) for admin in ADMINS),
     ]:
         print(f"  {label}  {email}  /  {password}")
     return 0

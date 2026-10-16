@@ -2,7 +2,7 @@ import uuid
 
 from fastapi import APIRouter, status
 
-from app.modules.auth.dependencies import AdminUser, CurrentUser
+from app.modules.auth.dependencies import CurrentUser, SuperAdminUser
 from app.modules.webhooks.dependencies import WebhookServiceDep
 from app.modules.webhooks.schemas import WebhookCreate, WebhookRead, WebhookUpdate
 from app.modules.webhooks.service import WebhookService
@@ -17,22 +17,22 @@ async def list_events(_: CurrentUser):
 
 
 @router.get("", response_model=Page[WebhookRead])
-async def list_webhooks(_: AdminUser, service: WebhookServiceDep, params: PageParamsDep):
+async def list_webhooks(_: SuperAdminUser, service: WebhookServiceDep, params: PageParamsDep):
     return await service.list_page(params)
 
 
 @router.post("", response_model=WebhookRead, status_code=status.HTTP_201_CREATED)
-async def create_webhook(_: AdminUser, data: WebhookCreate, service: WebhookServiceDep):
+async def create_webhook(_: SuperAdminUser, data: WebhookCreate, service: WebhookServiceDep):
     return await service.create(data)
 
 
 @router.patch("/{webhook_id}", response_model=WebhookRead)
 async def update_webhook(
-    _: AdminUser, webhook_id: uuid.UUID, data: WebhookUpdate, service: WebhookServiceDep
+    _: SuperAdminUser, webhook_id: uuid.UUID, data: WebhookUpdate, service: WebhookServiceDep
 ):
     return await service.update(webhook_id, data)
 
 
 @router.delete("/{webhook_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_webhook(_: AdminUser, webhook_id: uuid.UUID, service: WebhookServiceDep):
+async def delete_webhook(_: SuperAdminUser, webhook_id: uuid.UUID, service: WebhookServiceDep):
     await service.delete(webhook_id)

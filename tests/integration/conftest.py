@@ -59,7 +59,7 @@ PASSWORD = "s3cret-password"
 
 @pytest.fixture(autouse=True)
 async def clean_tables(request: pytest.FixtureRequest) -> AsyncGenerator[None]:
-    # Most tests start in a set-up workspace, so sign-ups work.
+    # Most tests start in a set-up workspace, so the super admin can create admins.
     if not request.node.get_closest_marker("not_set_up"):
         async with SessionFactory() as session:
             await UserService(session).create_super_admin(
@@ -108,12 +108,16 @@ def api_key_headers() -> dict[str, str]:
     return {"X-API-Key": TEST_API_KEY}
 
 
-async def register_and_login(
-    client: AsyncClient, email: str, full_name: str = "Test User"
+async def create_admin_and_login(
+    client: AsyncClient,
+    super_admin_headers: dict[str, str],
+    email: str,
+    full_name: str = "Test Admin",
 ) -> dict[str, str]:
     response = await client.post(
-        "/api/v1/auth/register",
+        "/api/v1/users",
         json={"email": email, "password": PASSWORD, "full_name": full_name},
+        headers=super_admin_headers,
     )
     assert response.status_code == 201, response.text
     return await login(client, email)
@@ -132,20 +136,18 @@ async def super_admin_headers(client: AsyncClient) -> dict[str, str]:
 
 @pytest.fixture
 async def admin_headers(client: AsyncClient, super_admin_headers: dict[str, str]) -> dict[str, str]:
-    """Headers for Ada, a team member the super admin made an admin."""
-    headers = await register_and_login(client, "admin@example.com", "Ada Admin")
-    me = (await client.get("/api/v1/auth/me", headers=headers)).json()
-    response = await client.patch(
-        f"/api/v1/users/{me['id']}", json={"role": "admin"}, headers=super_admin_headers
+    """Headers for Ada, an admin the super admin created."""
+    return await create_admin_and_login(
+        client, super_admin_headers, "admin@example.com", "Ada Admin"
     )
-    assert response.status_code == 200, response.text
-    return headers
 
 
 @pytest.fixture
-async def member_headers(client: AsyncClient, admin_headers: dict[str, str]) -> dict[str, str]:
-    """Headers for a second user (a member). Depends on the admin existing first."""
-    return await register_and_login(client, "member@example.com", "Max Member")
+async def member_headers(
+    client: AsyncClient, super_admin_headers: dict[str, str]
+) -> dict[str, str]:
+    """Headers for Max, a second admin: he must never see Ada's records."""
+    return await create_admin_and_login(client, super_admin_headers, "max@example.com", "Max Admin")
 
 
 @pytest.fixture

@@ -12,9 +12,6 @@ async def _contact(client: AsyncClient, headers: dict[str, str]) -> dict[str, An
     return response.json()
 
 
-# --- Tasks ---
-
-
 async def test_task_lifecycle(
     client: AsyncClient,
     admin_headers: dict[str, str],
@@ -55,9 +52,7 @@ async def test_task_lifecycle(
     ).status_code == 404
 
 
-async def test_task_filters(
-    client: AsyncClient, admin_headers: dict[str, str], member_headers: dict[str, str]
-) -> None:
+async def test_task_filters(client: AsyncClient, admin_headers: dict[str, str]) -> None:
     yesterday = (today_utc() - timedelta(days=1)).isoformat()
     tomorrow = (today_utc() + timedelta(days=1)).isoformat()
     contact = await _contact(client, admin_headers)
@@ -78,8 +73,8 @@ async def test_task_filters(
             },
             headers=admin_headers,
         )
-    await client.post("/api/v1/tasks", json={"title": "Member task"}, headers=member_headers)
-    me = (await client.get("/api/v1/auth/me", headers=member_headers)).json()
+    await client.post("/api/v1/tasks", json={"title": "No date"}, headers=admin_headers)
+    me = (await client.get("/api/v1/auth/me", headers=admin_headers)).json()
 
     async def titles(query: str) -> list[str]:
         response = await client.get(f"/api/v1/tasks?{query}", headers=admin_headers)
@@ -88,25 +83,22 @@ async def test_task_filters(
 
     assert await titles("overdue=true") == ["Late"]
     # A task without a due date is never overdue.
-    assert sorted(await titles("overdue=false")) == ["Late but done", "Member task", "Soon"]
+    assert sorted(await titles("overdue=false")) == ["Late but done", "No date", "Soon"]
     assert await titles("status=in_progress") == ["Soon"]
-    assert await titles(f"assignee_id={me['id']}") == ["Member task"]
+    assert len(await titles(f"assignee_id={me['id']}")) == 4
     assert len(await titles(f"contact_id={contact['id']}&deal_id={deal['id']}")) == 3
     assert await titles("search=soon") == ["Soon"]
 
 
 async def test_task_with_unknown_assignee_is_404(
-    client: AsyncClient, admin_headers: dict[str, str]
+    client: AsyncClient, api_key_headers: dict[str, str]
 ) -> None:
     response = await client.post(
         "/api/v1/tasks",
         json={"title": "T", "assignee_id": "00000000-0000-0000-0000-000000000000"},
-        headers=admin_headers,
+        headers=api_key_headers,
     )
     assert response.status_code == 404
-
-
-# --- Activities ---
 
 
 async def test_activity_lifecycle_and_filters(

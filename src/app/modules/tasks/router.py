@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, Response, status
 
-from app.modules.auth.dependencies import CurrentUser
+from app.modules.auth.dependencies import CurrentUser, WorkingUser
 from app.modules.tasks.dependencies import TaskServiceDep
 from app.modules.tasks.schemas import TaskCreate, TaskFilters, TaskRead, TaskUpdate
 from app.shared.csv_files import csv_response
@@ -31,7 +31,7 @@ async def export_tasks(
 
 
 @router.post("", response_model=TaskRead, status_code=status.HTTP_201_CREATED)
-async def create_task(data: TaskCreate, service: TaskServiceDep, user: CurrentUser):
+async def create_task(data: TaskCreate, service: TaskServiceDep, user: WorkingUser):
     return await service.create(data, user=user)
 
 
@@ -42,11 +42,11 @@ async def get_task(task_id: uuid.UUID, service: TaskServiceDep, _: CurrentUser):
 
 @router.patch("/{task_id}", response_model=TaskRead)
 async def update_task(
-    task_id: uuid.UUID, data: TaskUpdate, service: TaskServiceDep, _: CurrentUser
+    task_id: uuid.UUID, data: TaskUpdate, service: TaskServiceDep, _: WorkingUser
 ):
     return await service.update(task_id, data)
 
 
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_task(task_id: uuid.UUID, service: TaskServiceDep, _: CurrentUser):
+async def delete_task(task_id: uuid.UUID, service: TaskServiceDep, _: WorkingUser):
     await service.delete(task_id)

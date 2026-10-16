@@ -26,12 +26,6 @@ async def setup(data: RegisterRequest, service: AuthServiceDep):
     return await service.setup(data)
 
 
-@router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
-async def register(data: RegisterRequest, service: AuthServiceDep):
-    """New accounts are members. Answers 403 until the workspace is set up."""
-    return await service.register(data)
-
-
 @router.post("/login", response_model=TokenResponse)
 async def login(data: LoginRequest, service: AuthServiceDep):
     return await service.login(data)

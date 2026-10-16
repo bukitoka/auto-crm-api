@@ -25,14 +25,13 @@ and use the same port in `DATABASE_URL`.
 
 ## Demo data
 
-`uv run seed` creates a small sales team with companies, contacts, deals, activities and tasks.
+`uv run seed` creates a super admin and four admins, with companies, contacts, deals, activities and tasks.
 It only runs on an empty database; `uv run seed --reset` wipes the CRM data and seeds again.
 
 | Login | Password | Role |
 | --- | --- | --- |
 | `superadmin@example.com` | `superadmin12345` | super admin |
-| `admin@example.com` | `admin12345` | admin |
-| `sarah@example.com`, `marco@example.com`, `priya@example.com` | `member12345` | member |
+| `alex@example.com`, `sarah@example.com`, `marco@example.com`, `priya@example.com` | `admin12345` | admin |
 
 ## Commands
 
@@ -59,8 +58,10 @@ Each feature is a folder in `src/app/modules/` with the same files:
 Relationships are `lazy="raise"`, so a query that forgets to load related rows fails loudly instead
 of running hidden queries. `companies/` is the simplest module to copy when adding a new one.
 
-The super admin has every permission but isn't part of the team: it doesn't show up in user
-lists, pickers or the dashboard. It is normally created on the web app's setup page, the first time
+The super admin reads every admin's data but can't change CRM records. It creates and deactivates
+admins, and manages pipeline stages and webhooks. Admins see only their own records. There is no
+public sign-up. The super admin isn't part of the team: it doesn't show up in user
+lists or pickers. It is normally created on the web app's setup page, the first time
 someone opens a new install. From the terminal:
 
 ```bash
@@ -71,4 +72,5 @@ uv run superadmin reset-password --email you@example.com   # works for any accou
 Both ask for the password, or read `SUPERADMIN_PASSWORD` when not run in a terminal.
 
 Requests are authenticated with a JWT from `POST /auth/login`, or with the `X-API-Key` header for
-n8n, which then acts as the `automation@auto-crm.local` service account.
+n8n, which then acts as the `automation@auto-crm.local` service account. That account is unscoped
+(it reads and writes every record), can't log in, and is hidden from the user list.

@@ -10,6 +10,7 @@ from typing import Annotated
 from fastapi import Depends
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 
+from app.core.access import scope_for, set_scope
 from app.core.database import SessionDep
 from app.core.email import MailerDep
 from app.core.exceptions import AuthenticationError, PermissionDeniedError
@@ -30,28 +31,40 @@ AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 
 async def get_current_user(
     service: AuthServiceDep,
+    session: SessionDep,
     bearer: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     api_key: Annotated[str | None, Depends(api_key_scheme)],
 ) -> User:
+    """Authenticate the request and scope the session to what this user may touch."""
     if api_key is not None:
         if not is_valid_api_key(api_key):
             raise AuthenticationError("Invalid API key")
         return await service.service_account()
-    if bearer is not None:
-        return await service.user_from_token(bearer.credentials)
-    raise AuthenticationError()
+    if bearer is None:
+        raise AuthenticationError()
+    user = await service.user_from_token(bearer.credentials)
+    set_scope(session, scope_for(user))
+    return user
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
-async def require_admin(user: CurrentUser) -> User:
-    if not user.is_admin:
-        raise PermissionDeniedError("Admin privileges required")
+async def require_working_user(user: CurrentUser) -> User:
+    if user.is_super_admin:
+        raise PermissionDeniedError("The super admin can view data but not change it")
     return user
 
 
-AdminUser = Annotated[User, Depends(require_admin)]
+async def require_super_admin(user: CurrentUser) -> User:
+    if not user.is_super_admin:
+        raise PermissionDeniedError("Only the super admin can do this")
+    return user
+
+
+# Admins and the automation service account: whoever does CRM work.
+WorkingUser = Annotated[User, Depends(require_working_user)]
+SuperAdminUser = Annotated[User, Depends(require_super_admin)]
 
 
 async def require_api_key(

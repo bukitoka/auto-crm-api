@@ -22,9 +22,9 @@ from app.modules.auth.schemas import (
     SetupStatus,
     TokenResponse,
 )
-from app.modules.users.models import User
+from app.modules.users.models import SERVICE_ACCOUNT_EMAIL, User
 from app.modules.users.repository import UserRepository
-from app.modules.users.service import SERVICE_ACCOUNT_EMAIL, UserService
+from app.modules.users.service import UserService
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +35,6 @@ class AuthService:
         self.users = UserService(session)
         self.user_repo = UserRepository(session)
         self.mailer = mailer or get_mailer()
-
-    async def register(self, data: RegisterRequest) -> User:
-        return await self.users.create(
-            email=data.email, password=data.password, full_name=data.full_name
-        )
 
     async def setup_status(self) -> SetupStatus:
         return SetupStatus(needs_setup=not await self.user_repo.super_admin_exists())

@@ -15,7 +15,6 @@ from app.modules.ai.schemas import EmailDraft, ExtractedContact, LeadScore, Time
 from app.modules.assistant import speech
 from app.modules.assistant.service import MAX_STEPS
 from tests.fakes import FakeMailer
-from tests.integration.conftest import register_and_login
 
 URL = "/api/v1/assistant/conversations"
 Step = Callable[[list[dict[str, Any]]], ChatCompletionMessage]
@@ -91,9 +90,6 @@ async def start(client: AsyncClient, headers: dict[str, str], text: str = "Hi") 
     response = await client.post(URL, json=message(text), headers=headers)
     assert response.status_code == 201, response.text
     return response.json()
-
-
-# --- Conversations ---
 
 
 async def test_conversation_is_saved_and_continued(
@@ -183,50 +179,48 @@ async def test_sending_to_an_archived_chat_brings_it_back(
     assert turn.json()["conversation"]["is_archived"] is False
 
 
-async def test_privacy_and_admin_management(
+async def test_chats_are_private_and_the_super_admin_reads_only(
     client: AsyncClient,
     admin_headers: dict[str, str],
     member_headers: dict[str, str],
+    super_admin_headers: dict[str, str],
     ai: ScriptedAI,
 ) -> None:
     ai.script = [says("a"), says("b")]
-    mine = (await start(client, member_headers, "Member chat"))["conversation"]
-    admins = (await start(client, admin_headers, "Admin chat"))["conversation"]
-    other = await register_and_login(client, "other@example.com", "Olga Other")
+    mine = (await start(client, member_headers, "Max chat"))["conversation"]
+    ada = (await start(client, admin_headers, "Ada chat"))["conversation"]
 
-    # Members only see (and touch) their own chats.
     assert (await client.get(URL, headers=member_headers)).json()["total"] == 1
-    assert (await client.get(f"{URL}/{admins['id']}", headers=member_headers)).status_code == 404
-    assert (await client.get(f"{URL}/{mine['id']}", headers=other)).status_code == 404
-    assert (await client.delete(f"{URL}/{mine['id']}", headers=other)).status_code == 404
-    everyone_as_member = await client.get(URL, params={"scope": "all"}, headers=member_headers)
-    assert everyone_as_member.status_code == 403
+    assert (await client.get(f"{URL}/{ada['id']}", headers=member_headers)).status_code == 404
+    assert (await client.delete(f"{URL}/{ada['id']}", headers=member_headers)).status_code == 404
+    scope_all = await client.get(URL, params={"scope": "all"}, headers=member_headers)
+    assert scope_all.status_code == 403
 
-    # Admins see everyone's, can filter by user, and manage them...
-    everyone = (await client.get(URL, params={"scope": "all"}, headers=admin_headers)).json()
-    assert {c["user"]["full_name"] for c in everyone["items"]} == {"Ada Admin", "Max Member"}
-    only_member = await client.get(
-        URL, params={"scope": "all", "user_id": mine["user_id"]}, headers=admin_headers
+    everyone = (await client.get(URL, params={"scope": "all"}, headers=super_admin_headers)).json()
+    assert {c["user"]["full_name"] for c in everyone["items"]} == {"Ada Admin", "Max Admin"}
+    only_max = await client.get(
+        URL, params={"scope": "all", "user_id": mine["user_id"]}, headers=super_admin_headers
     )
-    assert [c["title"] for c in only_member.json()["items"]] == ["Member chat"]
-    assert (await client.get(f"{URL}/{mine['id']}", headers=admin_headers)).status_code == 200
+    assert [c["title"] for c in only_max.json()["items"]] == ["Max chat"]
+    assert (await client.get(f"{URL}/{mine['id']}", headers=super_admin_headers)).status_code == 200
 
-    # ...but cannot post in someone else's conversation.
     speak = await client.post(
-        f"{URL}/{mine['id']}/messages", json=message("Hi"), headers=admin_headers
+        f"{URL}/{mine['id']}/messages", json=message("Hi"), headers=super_admin_headers
     )
     assert speak.status_code == 403
-
-    archived = await client.patch(
-        f"{URL}/{mine['id']}", json={"is_archived": True}, headers=admin_headers
+    rename = await client.patch(
+        f"{URL}/{mine['id']}", json={"is_archived": True}, headers=super_admin_headers
     )
-    assert archived.json()["is_archived"] is True
+    assert rename.status_code == 403
+    remove = await client.delete(f"{URL}/{mine['id']}", headers=super_admin_headers)
+    assert remove.status_code == 403
 
 
-async def test_bulk_actions(
+async def test_bulk_actions_only_touch_own_chats(
     client: AsyncClient,
     admin_headers: dict[str, str],
     member_headers: dict[str, str],
+    super_admin_headers: dict[str, str],
     ai: ScriptedAI,
 ) -> None:
     ai.script = [says("a"), says("b"), says("c")]
@@ -234,7 +228,6 @@ async def test_bulk_actions(
     b = (await start(client, member_headers, "B"))["conversation"]["id"]
     c = (await start(client, admin_headers, "C"))["conversation"]["id"]
 
-    # A member can only affect their own conversations.
     archived = await client.post(
         f"{URL}/bulk", json={"ids": [a, c], "action": "archive"}, headers=member_headers
     )
@@ -244,13 +237,17 @@ async def test_bulk_actions(
     )
     assert restored.json() == {"affected": 1}
 
-    # An admin can delete anyone's.
-    deleted = await client.post(
-        f"{URL}/bulk", json={"ids": [a, b, c], "action": "delete"}, headers=admin_headers
+    boss = await client.post(
+        f"{URL}/bulk", json={"ids": [a, b, c], "action": "delete"}, headers=super_admin_headers
     )
-    assert deleted.json() == {"affected": 3}
-    everyone = (await client.get(URL, params={"scope": "all"}, headers=admin_headers)).json()
-    assert everyone["total"] == 0
+    assert boss.json() == {"affected": 0}
+
+    deleted = await client.post(
+        f"{URL}/bulk", json={"ids": [a, b, c], "action": "delete"}, headers=member_headers
+    )
+    assert deleted.json() == {"affected": 2}
+    left = (await client.get(URL, params={"scope": "all"}, headers=super_admin_headers)).json()
+    assert left["total"] == 1
 
 
 async def test_failed_first_reply_leaves_no_empty_chat(
@@ -295,9 +292,6 @@ async def test_request_validation(
         f"{URL}/bulk", json={"ids": [], "action": "delete"}, headers=admin_headers
     )
     assert bulk.status_code == 422
-
-
-# --- Tools ---
 
 
 async def test_follow_up_creates_task_and_note(
@@ -357,7 +351,6 @@ async def test_follow_up_creates_task_and_note(
 async def test_every_tool_runs_against_the_api(
     client: AsyncClient,
     admin_headers: dict[str, str],
-    member_headers: dict[str, str],
     ai: ScriptedAI,
     mailer: FakeMailer,
 ) -> None:
@@ -399,7 +392,6 @@ async def test_every_tool_runs_against_the_api(
         json={"type": "call", "subject": "Intro call", "contact_id": contact["id"]},
         headers=admin_headers,
     )
-    member_id = (await client.get("/api/v1/auth/me", headers=member_headers)).json()["id"]
     contact_id = contact["id"]
     ai.script = [
         calls(
@@ -413,7 +405,6 @@ async def test_every_tool_runs_against_the_api(
             ("list_users", {}),
             ("get_dashboard_summary", {}),
             ("list_activities", {"contact_id": contact_id}),
-            ("list_automations", {}),
             ("summarize_timeline", {"contact_id": contact_id}),
             ("draft_email", {"contact_id": contact_id, "purpose": "Check in"}),
         ),
@@ -425,7 +416,7 @@ async def test_every_tool_runs_against_the_api(
                 {"contact_id": contact_id, "status": "prospect", "add_tags": ["hot", "vip"]},
             ),
             ("create_contact", {"first_name": "Lia", "email": "lia@globex.com"}),
-            ("create_task", {"title": "Plan the week", "assignee_id": member_id}),
+            ("create_task", {"title": "Plan the week"}),
             ("create_company", {"name": "Initech", "industry": "Software"}),
             ("update_company", {"company_id": company["id"], "industry": "Energy"}),
             ("create_deal", {"title": "Initech deal", "value": 5000, "stage_name": "proposal"}),
@@ -449,12 +440,11 @@ async def test_every_tool_runs_against_the_api(
     assert reads[4]["contacts"]["items"][0]["name"] == "Sam"
     assert [t["title"] for t in reads[5]["tasks"]] == ["Call Sam"]
     assert reads[6]["stages"][0] == "Qualification"
-    assert {u["name"] for u in reads[7]["users"]} == {"Ada Admin", "Max Member"}
+    assert [u["name"] for u in reads[7]["users"]] == ["Ada Admin"]
     assert reads[8]["pipeline_by_stage"][0]["stage"] == "Qualification"
     assert reads[9]["activities"][0]["subject"] == "Intro call"
-    assert reads[10] == {"webhook_subscriptions": []}
-    assert reads[11]["summary"] == "Going well."
-    assert reads[12] == {"subject": "Hi", "body": "Hello Sam", "sent": False}
+    assert reads[10]["summary"] == "Going well."
+    assert reads[11] == {"subject": "Hi", "body": "Hello Sam", "sent": False}
 
     writes = ai.tool_results(2)
     assert all("error" not in result for result in writes), writes
@@ -488,18 +478,69 @@ async def test_every_tool_runs_against_the_api(
     planned = (
         await client.get("/api/v1/tasks", params={"search": "Plan"}, headers=admin_headers)
     ).json()
-    assert planned["items"][0]["assignee"]["full_name"] == "Max Member"
+    assert planned["items"][0]["assignee"]["full_name"] == "Ada Admin"
     assert [m.to for m in mailer.outbox] == ["Sam <sam@globex.com>"]
 
 
-async def test_members_cannot_see_automations(
-    client: AsyncClient, member_headers: dict[str, str], ai: ScriptedAI
+async def test_assistant_tools_follow_the_role(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    super_admin_headers: dict[str, str],
+    ai: ScriptedAI,
 ) -> None:
-    ai.script = [calls(("list_automations", {})), says("Sorry.")]
+    ai.script = [
+        calls(("list_automations", {}), ("create_admin", {"email": "x@y.com", "full_name": "X"})),
+        says("Sorry."),
+    ]
+    await client.post(URL, json=message("Show automations"), headers=admin_headers)
+    assert all("error" in result for result in ai.tool_results())
 
-    await client.post(URL, json=message("Show automations"), headers=member_headers)
+    ai.script = [calls(("create_contact", {"first_name": "Nope"})), says("Cannot.")]
+    await client.post(URL, json=message("Add a contact"), headers=super_admin_headers)
+    assert "error" in ai.tool_results()[0]
 
-    assert ai.tool_results()[0] == {"error": "Only admins can see automations"}
+
+async def test_super_admin_assistant_manages_admins(
+    client: AsyncClient, super_admin_headers: dict[str, str], ai: ScriptedAI
+) -> None:
+    ai.script = [
+        calls(("create_admin", {"email": "newbie@example.com", "full_name": "Nina New"})),
+        says("Created."),
+    ]
+    await client.post(URL, json=message("Add Nina"), headers=super_admin_headers)
+    created = ai.tool_results()[0]
+    assert created["created_admin"]["email"] == "newbie@example.com"
+    assert created["temporary_password"]
+
+    ai.script = [
+        calls(("set_admin_active", {"user_id": created["created_admin"]["id"], "active": False})),
+        calls(("list_users", {})),
+        says("Done."),
+    ]
+    await client.post(URL, json=message("Deactivate Nina"), headers=super_admin_headers)
+    users = ai.tool_results()[1]["users"]
+    assert [(u["name"], u["active"]) for u in users if u["name"] == "Nina New"] == [
+        ("Nina New", False)
+    ]
+
+
+async def test_assistant_only_sees_its_own_users_data(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    member_headers: dict[str, str],
+    ai: ScriptedAI,
+) -> None:
+    await client.post("/api/v1/contacts", json={"first_name": "Ada's"}, headers=admin_headers)
+    ai.script = [
+        calls(("search_contacts", {"query": "Ada"}), ("list_users", {})),
+        says("Nothing."),
+    ]
+
+    await client.post(URL, json=message("Find Ada's"), headers=member_headers)
+
+    contacts, users = ai.tool_results()
+    assert contacts["contacts"] == []
+    assert [u["name"] for u in users["users"]] == ["Max Admin"]
 
 
 async def test_tool_problems_go_back_to_the_model(
@@ -563,31 +604,25 @@ async def test_smart_capture_from_a_file(
     assert unsupported.status_code == 400
 
 
-async def test_task_questions_see_the_whole_team_like_the_dashboard(
+async def test_task_questions_stay_within_the_users_own_tasks(
     client: AsyncClient,
     admin_headers: dict[str, str],
     member_headers: dict[str, str],
     ai: ScriptedAI,
 ) -> None:
-    member_id = (await client.get("/api/v1/auth/me", headers=member_headers)).json()["id"]
     for title in ("Late one", "Late two"):
         await client.post(
-            "/api/v1/tasks",
-            json={"title": title, "due_date": "2020-01-01", "assignee_id": member_id},
-            headers=admin_headers,
+            "/api/v1/tasks", json={"title": title, "due_date": "2020-01-01"}, headers=admin_headers
         )
-    done = (
-        await client.post(
-            "/api/v1/tasks",
-            json={"title": "Finished", "status": "done", "assignee_id": member_id},
-            headers=admin_headers,
-        )
-    ).json()
+    await client.post(
+        "/api/v1/tasks",
+        json={"title": "Max late", "due_date": "2020-01-01"},
+        headers=member_headers,
+    )
     ai.script = [
         calls(
             ("list_tasks", {"overdue_only": True}),
             ("list_tasks", {"assignee": "me"}),
-            ("list_tasks", {"assignee": member_id, "include_done": True}),
             ("list_tasks", {"assignee": "nobody"}),
             ("get_dashboard_summary", {}),
         ),
@@ -597,18 +632,13 @@ async def test_task_questions_see_the_whole_team_like_the_dashboard(
     response = await client.post(URL, json=message("Any overdue tasks?"), headers=admin_headers)
 
     assert response.status_code == 201, response.text
-    team, mine, member, unknown, dashboard = ai.tool_results(1)
-    assert team["total"] == 2
-    assert {t["title"] for t in team["tasks"]} == {"Late one", "Late two"}
-    assert mine == {"assignee": "me", "total": 0, "tasks": []}
-    assert done["title"] in {t["title"] for t in member["tasks"]}
-    assert member["total"] == 3
+    overdue, mine, unknown, dashboard = ai.tool_results(1)
+    assert {t["title"] for t in overdue["tasks"]} == {"Late one", "Late two"}
+    assert mine["total"] == 2
     assert "error" in unknown
-    assert dashboard["overdue_tasks_all_users"] == 2
+    assert dashboard["overdue_tasks"] == 2
     assert len(dashboard["overdue_task_list"]) == 2
 
-
-# --- Attached files ---
 
 CARD = ("card.txt", b"Jane Doe\nCTO, Initech\njane@initech.io", "text/plain")
 EMAIL = (
@@ -703,9 +733,6 @@ async def test_attachment_validation(
     assert no_files.status_code == 422
     assert ai.requests == []
     assert (await client.get(URL, headers=admin_headers)).json()["total"] == 0
-
-
-# --- Voice input ---
 
 
 async def test_transcribe_returns_the_text(

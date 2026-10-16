@@ -2,7 +2,7 @@ import uuid
 
 from fastapi import APIRouter, status
 
-from app.modules.auth.dependencies import AdminUser, CurrentUser
+from app.modules.auth.dependencies import CurrentUser, SuperAdminUser
 from app.modules.pipeline.dependencies import PipelineServiceDep
 from app.modules.pipeline.schemas import StageCreate, StageOrder, StageRead, StageUpdate
 
@@ -15,18 +15,18 @@ async def list_stages(service: PipelineServiceDep, _: CurrentUser):
 
 
 @router.post("/stages", response_model=StageRead, status_code=status.HTTP_201_CREATED)
-async def create_stage(data: StageCreate, service: PipelineServiceDep, _: AdminUser):
+async def create_stage(data: StageCreate, service: PipelineServiceDep, _: SuperAdminUser):
     return await service.create(data)
 
 
 @router.put("/stages/order", response_model=list[StageRead])
-async def reorder_stages(data: StageOrder, service: PipelineServiceDep, _: AdminUser):
+async def reorder_stages(data: StageOrder, service: PipelineServiceDep, _: SuperAdminUser):
     return await service.reorder(data)
 
 
 @router.patch("/stages/{stage_id}", response_model=StageRead)
 async def update_stage(
-    stage_id: uuid.UUID, data: StageUpdate, service: PipelineServiceDep, _: AdminUser
+    stage_id: uuid.UUID, data: StageUpdate, service: PipelineServiceDep, _: SuperAdminUser
 ):
     return await service.update(stage_id, data)
 
@@ -35,7 +35,7 @@ async def update_stage(
 async def delete_stage(
     stage_id: uuid.UUID,
     service: PipelineServiceDep,
-    _: AdminUser,
+    _: SuperAdminUser,
     move_to: uuid.UUID | None = None,
 ):
     """Deals in the stage are moved to `move_to` first (required when there are any)."""

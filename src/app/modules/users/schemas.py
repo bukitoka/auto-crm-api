@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 from app.modules.users.models import UserRole
 from app.shared.schemas import ImageUrl, ORMModel
@@ -19,9 +19,14 @@ class UserRead(ORMModel):
     updated_at: datetime
 
 
-class UserUpdate(BaseModel):
-    """Admin-only changes to a user."""
+class AdminCreate(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+    full_name: str = Field(min_length=1, max_length=200)
 
-    full_name: str | None = None
-    role: UserRole | None = None
+
+class UserUpdate(BaseModel):
+    """What the super admin can change on an admin account."""
+
+    full_name: str | None = Field(default=None, min_length=1, max_length=200)
     is_active: bool | None = None

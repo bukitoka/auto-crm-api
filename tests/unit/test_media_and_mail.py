@@ -32,9 +32,6 @@ def upload(data: bytes) -> UploadFile:
     return UploadFile(io.BytesIO(data), filename="picture")
 
 
-# --- to_webp / read_image ---
-
-
 @pytest.mark.parametrize("fmt", ["PNG", "JPEG", "WEBP", "GIF"])
 def test_to_webp_converts_and_shrinks(fmt: str) -> None:
     result = Image.open(io.BytesIO(to_webp(make_image(fmt), max_size=512)))
@@ -94,9 +91,6 @@ async def test_replace_image_without_old_key() -> None:
     storage = FakeStorage()
     key = await replace_image(storage, folder="contacts/1", image=b"img", old_key=None)
     assert list(storage.files) == [key]
-
-
-# --- Storage ---
 
 
 @pytest.fixture
@@ -162,9 +156,6 @@ def test_url_is_presigned_for_the_public_host_and_stable() -> None:
 def test_image_url_handles_missing_keys() -> None:
     assert image_url(None) is None
     assert image_url("x.webp") is not None
-
-
-# --- Mailer ---
 
 
 def test_build_message() -> None:

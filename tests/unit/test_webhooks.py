@@ -17,8 +17,6 @@ from app.modules.webhooks.service import WebhookService
 from app.shared.pagination import PageParams
 from tests.unit.conftest import make_webhook, mock_repos
 
-# --- WebhookService ---
-
 
 @pytest.fixture
 def service(session: AsyncMock) -> WebhookService:
@@ -78,9 +76,6 @@ async def test_list_page(service: WebhookService) -> None:
     page = await service.list_page(PageParams())
 
     assert page.items[0].event == Event.DEAL_WON
-
-
-# --- delivery ---
 
 
 def test_sign_payload_is_hex_hmac_sha256_of_the_body() -> None:

@@ -35,9 +35,6 @@ def fixed_now(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(task_service_module, "utc_now", lambda: NOW)
 
 
-# --- Activities ---
-
-
 @pytest.fixture
 def activities(session: AsyncMock) -> ActivityService:
     service = ActivityService(session)
@@ -112,9 +109,6 @@ async def test_list_activities(activities: ActivityService) -> None:
     page = await activities.list_page(ActivityFilters(type=ActivityType.CALL), PageParams())
 
     assert page.items[0].type == ActivityType.CALL
-
-
-# --- Tasks ---
 
 
 @pytest.fixture

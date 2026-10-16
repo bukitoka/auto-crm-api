@@ -16,30 +16,30 @@ def test_sign_payload_matches_hmac_sha256() -> None:
     assert delivery.sign_payload("secret", body) == f"sha256={expected}"
 
 
-async def test_webhook_management_is_admin_only(
-    client: AsyncClient, admin_headers: dict[str, str], member_headers: dict[str, str]
+async def test_webhook_management_is_super_admin_only(
+    client: AsyncClient, super_admin_headers: dict[str, str], admin_headers: dict[str, str]
 ) -> None:
     payload = {"event": "deal.won", "target_url": "http://n8n.local/webhook/won"}
 
-    forbidden = await client.post("/api/v1/webhooks", json=payload, headers=member_headers)
+    forbidden = await client.post("/api/v1/webhooks", json=payload, headers=admin_headers)
     assert forbidden.status_code == 403
 
-    created = await client.post("/api/v1/webhooks", json=payload, headers=admin_headers)
+    created = await client.post("/api/v1/webhooks", json=payload, headers=super_admin_headers)
     assert created.status_code == 201
     assert len(created.json()["secret"]) > 20
 
-    events = await client.get("/api/v1/webhooks/events", headers=member_headers)
+    events = await client.get("/api/v1/webhooks/events", headers=admin_headers)
     assert "deal.stage_changed" in events.json()
 
 
 async def test_deliver_event_posts_signed_payload(
-    client: AsyncClient, admin_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+    client: AsyncClient, super_admin_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     webhook = (
         await client.post(
             "/api/v1/webhooks",
             json={"event": "contact.created", "target_url": "http://n8n.local/hook"},
-            headers=admin_headers,
+            headers=super_admin_headers,
         )
     ).json()
 
@@ -66,39 +66,39 @@ async def test_deliver_event_posts_signed_payload(
     )
 
 
-async def test_admin_can_list_update_and_delete_webhooks(
-    client: AsyncClient, admin_headers: dict[str, str]
+async def test_super_admin_can_list_update_and_delete_webhooks(
+    client: AsyncClient, super_admin_headers: dict[str, str]
 ) -> None:
     webhook = (
         await client.post(
             "/api/v1/webhooks",
             json={"event": "deal.won", "target_url": "http://n8n.local/won"},
-            headers=admin_headers,
+            headers=super_admin_headers,
         )
     ).json()
 
-    listed = await client.get("/api/v1/webhooks", headers=admin_headers)
+    listed = await client.get("/api/v1/webhooks", headers=super_admin_headers)
     assert [w["id"] for w in listed.json()["items"]] == [webhook["id"]]
 
     updated = await client.patch(
-        f"/api/v1/webhooks/{webhook['id']}", json={"is_active": False}, headers=admin_headers
+        f"/api/v1/webhooks/{webhook['id']}", json={"is_active": False}, headers=super_admin_headers
     )
     assert updated.json()["is_active"] is False
     assert updated.json()["secret"] == webhook["secret"]
 
-    deleted = await client.delete(f"/api/v1/webhooks/{webhook['id']}", headers=admin_headers)
+    deleted = await client.delete(f"/api/v1/webhooks/{webhook['id']}", headers=super_admin_headers)
     assert deleted.status_code == 204
-    again = await client.delete(f"/api/v1/webhooks/{webhook['id']}", headers=admin_headers)
+    again = await client.delete(f"/api/v1/webhooks/{webhook['id']}", headers=super_admin_headers)
     assert again.status_code == 404
 
 
 async def test_inactive_webhooks_are_not_called(
-    client: AsyncClient, admin_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+    client: AsyncClient, super_admin_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await client.post(
         "/api/v1/webhooks",
         json={"event": "contact.created", "target_url": "http://n8n.local/x", "is_active": False},
-        headers=admin_headers,
+        headers=super_admin_headers,
     )
 
     def fail_if_called(**kwargs: Any) -> httpx.AsyncClient:

@@ -3,6 +3,7 @@ import uuid
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.access import ensure_own
 from app.core.exceptions import NotFoundError
 from app.core.storage import Storage, get_storage
 from app.modules.companies.models import Company
@@ -115,5 +116,6 @@ class CompanyService:
         return await self.get(company.id)
 
     async def _check_owner(self, owner_id: uuid.UUID | None) -> None:
+        ensure_own(self.session, owner_id)
         if owner_id is not None and await self.users.get(owner_id) is None:
             raise NotFoundError("Owner not found")

@@ -32,7 +32,7 @@ async def seeded() -> None:
 
 async def test_seed_creates_the_expected_number_of_records(seeded: None) -> None:
     async with SessionFactory() as session:
-        assert await _count(session, User) == 2 + len(seed.MEMBERS)  # admin, super admin
+        assert await _count(session, User) == 1 + len(seed.ADMINS)
         assert await _count(session, Company) == seed.COMPANY_COUNT
         assert await _count(session, Contact) == seed.CONTACT_COUNT
         assert await _count(session, Deal) == seed.DEAL_COUNT
@@ -41,15 +41,14 @@ async def test_seed_creates_the_expected_number_of_records(seeded: None) -> None
         assert await _count(session, WebhookSubscription) == len(seed.N8N_WEBHOOKS)
 
 
-async def test_seeded_users_have_a_super_admin_an_admin_and_members(seeded: None) -> None:
+async def test_seeded_users_have_a_super_admin_and_admins(seeded: None) -> None:
     async with SessionFactory() as session:
         rows = (await session.execute(select(User.email, User.role, User.is_super_admin))).all()
         roles = {email: role for email, role, _ in rows}
         super_admins = [email for email, _, is_super_admin in rows if is_super_admin]
 
     assert super_admins == [seed.SUPER_ADMIN[0]]
-    assert roles[seed.ADMIN[0]] == UserRole.ADMIN
-    assert [roles[email] for email, _, _ in seed.MEMBERS] == [UserRole.MEMBER] * 3
+    assert [roles[email] for email, _, _ in seed.ADMINS] == [UserRole.ADMIN] * len(seed.ADMINS)
 
 
 async def test_seed_keeps_a_super_admin_from_the_setup_page() -> None:

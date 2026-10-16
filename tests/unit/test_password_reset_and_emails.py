@@ -22,8 +22,6 @@ from app.modules.users.service import SERVICE_ACCOUNT_EMAIL, UserService
 from tests.fakes import FakeMailer, FakeStorage
 from tests.unit.conftest import make_activity, make_company, make_contact, make_user, mock_repos
 
-# --- Tokens ---
-
 
 def test_reset_token_round_trip() -> None:
     user = make_user()
@@ -43,9 +41,6 @@ def test_reset_token_and_access_token_are_not_interchangeable() -> None:
     assert decode_access_token(create_password_reset_token(user.id, "hash")) is None
     assert decode_password_reset_token(create_access_token(user.id)) is None
     assert decode_password_reset_token("garbage") is None
-
-
-# --- AuthService ---
 
 
 @pytest.fixture
@@ -125,9 +120,6 @@ async def test_reset_password_rejects_invalid_requests(auth: AuthService, case: 
         await auth.reset_password(ResetPasswordRequest(token=token, password="whatever-123"))
 
 
-# --- EmailService ---
-
-
 @pytest.fixture
 def emails(session: AsyncMock, mailer: FakeMailer) -> EmailService:
     service = EmailService(session, mailer)
@@ -183,9 +175,6 @@ async def test_failed_send_is_not_logged(emails: EmailService) -> None:
             user=make_user(),
         )
     emails.activities.create.assert_not_awaited()
-
-
-# --- Image methods on services ---
 
 
 @pytest.fixture

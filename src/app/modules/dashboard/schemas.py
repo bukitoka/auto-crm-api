@@ -42,14 +42,14 @@ class DashboardSummary(BaseModel):
     win_rate: float | None  # won / (won + lost) closed in the last 90 days; null if none closed
     average_deal_size: float | None  # mean value of deals won in the last 90 days
     new_leads_this_month: int  # contacts created since the 1st of this month (UTC)
-    overdue_tasks: int  # all users' tasks due before today that are not done
-    tasks_due_today: int  # all users' open tasks
-    tasks_due_this_week: int  # all users' open tasks due today through the next 6 days
+    overdue_tasks: int  # open tasks due before today
+    tasks_due_today: int  # open tasks
+    tasks_due_this_week: int  # open tasks due today through the next 6 days
     pipeline_by_stage: list[StageSummary]  # every stage, in pipeline order
     contacts_by_status: list[StatusCount]  # every status, in lifecycle order
     activities_last_30_days: list[ActivityTypeCount]  # every activity type
     overdue_task_list: list[TaskRead]  # oldest due first (max 10)
     deals_closing_soon: list[DealRead]  # open deals expected to close in the next 30 days (max 10)
-    team: list[TeamMemberStats]  # active users, most won this month first
+    team: list[TeamMemberStats]  # active admins, most won this month first
     recent_activities: list[ActivityRead]  # latest 10
     my_tasks: list[TaskRead]  # current user's open tasks, soonest due first (max 10)

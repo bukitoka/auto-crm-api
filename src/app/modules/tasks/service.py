@@ -3,6 +3,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import events
+from app.core.access import ensure_own
 from app.core.events import Event
 from app.core.exceptions import NotFoundError
 from app.modules.contacts.repository import ContactRepository
@@ -109,6 +110,7 @@ class TaskService:
         await self.session.commit()
 
     async def _check_references(self, values: dict) -> None:
+        ensure_own(self.session, values.get("assignee_id"))
         if values.get("assignee_id") and await self.users.get(values["assignee_id"]) is None:
             raise NotFoundError("Assignee not found")
         if values.get("contact_id") and not await self.contacts.exists(values["contact_id"]):

@@ -69,13 +69,13 @@ class ConversationUpdate(BaseModel):
 class ConversationFilters(BaseModel):
     search: str | None = None
     archived: bool = False
-    # "mine" (default) or, for admins, "all" users' conversations (optionally one user's).
+    # "mine" (default) or, for the super admin, all admins' conversations (optionally one user's).
     scope: Literal["mine", "all"] = "mine"
     user_id: uuid.UUID | None = None
 
 
 class BulkAction(BaseModel):
-    """Admin tool: archive, restore or delete many conversations at once."""
+    """Archive, restore or delete many of your own conversations at once."""
 
     ids: list[uuid.UUID] = Field(min_length=1, max_length=200)
     action: Literal["archive", "unarchive", "delete"]

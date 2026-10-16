@@ -1,3 +1,5 @@
+import uuid
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.activities.models import Activity, ActivityType
@@ -29,7 +31,9 @@ class IntegrationService:
         created = contact is None
 
         if contact is None:
-            company = await self._find_or_create_company(data.company_name, user=user)
+            company = await self._find_or_create_company(
+                data.company_name, owner_id=data.owner_id, user=user
+            )
             contact = await self.contact_service.create(
                 ContactCreate(
                     first_name=data.first_name,
@@ -38,6 +42,7 @@ class IntegrationService:
                     phone=data.phone,
                     source=data.source,
                     company_id=company.id if company else None,
+                    owner_id=data.owner_id,
                 ),
                 user=user,
             )
@@ -55,10 +60,12 @@ class IntegrationService:
 
         return await self.contact_service.get(contact.id), created
 
-    async def _find_or_create_company(self, name: str | None, *, user: User) -> Company | None:
+    async def _find_or_create_company(
+        self, name: str | None, *, owner_id: uuid.UUID | None, user: User
+    ) -> Company | None:
         if not name:
             return None
         company = await self.companies.get_by_name(name)
         if company is None:
-            company = await self.companies.add(Company(name=name, owner_id=user.id))
+            company = await self.companies.add(Company(name=name, owner_id=owner_id or user.id))
         return company

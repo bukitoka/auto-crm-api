@@ -33,7 +33,7 @@ class ConversationRepository:
         offset: int,
         limit: int,
     ) -> tuple[list[Conversation], int]:
-        """`user_id=None` means every user's conversations (admins only)."""
+        """`user_id=None` means every user's conversations (super admin only)."""
         query = select(Conversation).where(Conversation.is_archived == archived)
         if user_id is not None:
             query = query.where(Conversation.user_id == user_id)

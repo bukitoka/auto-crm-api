@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "6c1d3e0a-8f43-4f61-9a43-2f3c8e5d7a01",
     "name": "Auto CRM API - E2E",
-    "description": "End-to-end story for the Auto CRM API. Run it against an EMPTY database (./e2e/run.sh does this): the first registered user becomes the admin and the dashboard assertions expect only the records created here.",
+    "description": "End-to-end story for the Auto CRM API. Run it against an EMPTY database (./e2e/run.sh does this): set up the super admin, create two admins, do the CRM work as the first admin, and check that the super admin is read-only and that the second admin cannot see the first admin's records.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -55,10 +55,10 @@
     },
     {
       "name": "02 Auth",
-      "description": "Register the first user (admin) and a member, then log in.",
+      "description": "Set up the super admin, create two admins with POST /users, then log in as each.",
       "item": [
         {
-          "name": "Setup is needed on a new workspace",
+          "name": "Setup is needed on a new install",
           "event": [
             {
               "listen": "test",
@@ -95,14 +95,14 @@
           }
         },
         {
-          "name": "Register before setup is 403",
+          "name": "Public sign-up is gone",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));"
+                  "pm.test(\"no register route\", () => pm.expect(pm.response.code).to.be.oneOf([404, 405]));"
                 ]
               }
             }
@@ -148,10 +148,10 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
-                  "pm.test(\"response matches schema\", () => pm.response.to.have.jsonSchema({\"type\": \"object\", \"required\": [\"id\", \"email\", \"full_name\", \"role\", \"is_active\", \"created_at\", \"updated_at\"], \"properties\": {\"id\": {\"type\": \"string\", \"pattern\": \"^[0-9a-f-]{36}$\"}, \"role\": {\"enum\": [\"admin\", \"member\"]}}, \"not\": {\"required\": [\"hashed_password\"]}}));",
+                  "pm.test(\"response matches schema\", () => pm.response.to.have.jsonSchema({\"type\": \"object\", \"required\": [\"id\", \"email\", \"full_name\", \"role\", \"is_active\", \"created_at\", \"updated_at\"], \"properties\": {\"id\": {\"type\": \"string\", \"pattern\": \"^[0-9a-f-]{36}$\"}, \"role\": {\"enum\": [\"admin\"]}}, \"not\": {\"required\": [\"hashed_password\"]}}));",
                   "pm.test(\"super admin\", () => { const body = pm.response.json(); pm.expect(body.role).to.eql(\"admin\"); pm.expect(body.is_super_admin).to.eql(true); });",
-                  "pm.test(\"email is stored lowercase\", () => { const body = pm.response.json(); pm.expect(body.email).to.eql(pm.environment.get(\"adminEmail\")); });",
-                  "pm.collectionVariables.set(\"adminId\", pm.response.json().id);"
+                  "pm.test(\"email is stored lowercase\", () => { const body = pm.response.json(); pm.expect(body.email).to.eql(pm.environment.get(\"superEmail\")); });",
+                  "pm.collectionVariables.set(\"superId\", pm.response.json().id);"
                 ]
               }
             }
@@ -179,7 +179,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"{{adminEmailMixedCase}}\",\n  \"password\": \"{{password}}\",\n  \"full_name\": \"Ada Admin\"\n}",
+              "raw": "{\n  \"email\": \"{{superEmailMixedCase}}\",\n  \"password\": \"{{password}}\",\n  \"full_name\": \"Sue Super\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -271,17 +271,16 @@
           }
         },
         {
-          "name": "Register second user becomes member",
+          "name": "Login super admin",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
-                  "pm.test(\"response matches schema\", () => pm.response.to.have.jsonSchema({\"type\": \"object\", \"required\": [\"id\", \"email\", \"full_name\", \"role\", \"is_active\", \"created_at\", \"updated_at\"], \"properties\": {\"id\": {\"type\": \"string\", \"pattern\": \"^[0-9a-f-]{36}$\"}, \"role\": {\"enum\": [\"admin\", \"member\"]}}, \"not\": {\"required\": [\"hashed_password\"]}}));",
-                  "pm.test(\"second user is member\", () => { const body = pm.response.json(); pm.expect(body.role).to.eql(\"member\"); });",
-                  "pm.collectionVariables.set(\"memberId\", pm.response.json().id);"
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"bearer token returned\", () => { const body = pm.response.json(); pm.expect(body.token_type).to.eql(\"bearer\"); pm.expect(body.access_token).to.be.a(\"string\"); });",
+                  "pm.collectionVariables.set(\"superToken\", pm.response.json().access_token);"
                 ]
               }
             }
@@ -295,13 +294,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/auth/register",
+              "raw": "{{baseUrl}}/auth/login",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "auth",
-                "register"
+                "login"
               ]
             },
             "auth": {
@@ -309,7 +308,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"{{memberEmail}}\",\n  \"password\": \"{{password}}\",\n  \"full_name\": \"Max Member\"\n}",
+              "raw": "{\n  \"email\": \"{{superEmail}}\",\n  \"password\": \"{{password}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -319,7 +318,61 @@
           }
         },
         {
-          "name": "Register duplicate email is 409",
+          "name": "Super admin creates an admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"response matches schema\", () => pm.response.to.have.jsonSchema({\"type\": \"object\", \"required\": [\"id\", \"email\", \"full_name\", \"role\", \"is_active\", \"created_at\", \"updated_at\"], \"properties\": {\"id\": {\"type\": \"string\", \"pattern\": \"^[0-9a-f-]{36}$\"}, \"role\": {\"enum\": [\"admin\"]}}, \"not\": {\"required\": [\"hashed_password\"]}}));",
+                  "pm.test(\"a plain admin\", () => { const body = pm.response.json(); pm.expect(body.role).to.eql(\"admin\"); pm.expect(body.is_super_admin).to.eql(false); pm.expect(body.is_active).to.eql(true); });",
+                  "pm.collectionVariables.set(\"adminId\", pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{password}}\",\n  \"full_name\": \"Ada Admin\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Duplicate admin email is 409",
           "event": [
             {
               "listen": "test",
@@ -341,21 +394,27 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/auth/register",
+              "raw": "{{baseUrl}}/users",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "auth",
-                "register"
+                "users"
               ]
             },
             "auth": {
-              "type": "noauth"
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"{{memberEmail}}\",\n  \"password\": \"{{password}}\",\n  \"full_name\": \"Again\"\n}",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{password}}\",\n  \"full_name\": \"Again\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -365,7 +424,7 @@
           }
         },
         {
-          "name": "Register short password is 422",
+          "name": "Short password is 422",
           "event": [
             {
               "listen": "test",
@@ -386,21 +445,81 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/auth/register",
+              "raw": "{{baseUrl}}/users",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "auth",
-                "register"
+                "users"
               ]
             },
             "auth": {
-              "type": "noauth"
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"short@example.com\",\n  \"password\": \"123\",\n  \"full_name\": \"Short\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Super admin creates a second admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"response matches schema\", () => pm.response.to.have.jsonSchema({\"type\": \"object\", \"required\": [\"id\", \"email\", \"full_name\", \"role\", \"is_active\", \"created_at\", \"updated_at\"], \"properties\": {\"id\": {\"type\": \"string\", \"pattern\": \"^[0-9a-f-]{36}$\"}, \"role\": {\"enum\": [\"admin\"]}}, \"not\": {\"required\": [\"hashed_password\"]}}));",
+                  "pm.test(\"a plain admin\", () => { const body = pm.response.json(); pm.expect(body.role).to.eql(\"admin\"); pm.expect(body.is_super_admin).to.eql(false); pm.expect(body.is_active).to.eql(true); });",
+                  "pm.collectionVariables.set(\"admin2Id\", pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{admin2Email}}\",\n  \"password\": \"{{password}}\",\n  \"full_name\": \"Max Admin\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -457,7 +576,7 @@
           }
         },
         {
-          "name": "Login member",
+          "name": "Login second admin",
           "event": [
             {
               "listen": "test",
@@ -465,7 +584,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
-                  "pm.collectionVariables.set(\"memberToken\", pm.response.json().access_token);"
+                  "pm.test(\"bearer token returned\", () => { const body = pm.response.json(); pm.expect(body.token_type).to.eql(\"bearer\"); pm.expect(body.access_token).to.be.a(\"string\"); });",
+                  "pm.collectionVariables.set(\"admin2Token\", pm.response.json().access_token);"
                 ]
               }
             }
@@ -493,12 +613,52 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"{{memberEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "raw": "{\n  \"email\": \"{{admin2Email}}\",\n  \"password\": \"{{password}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
+            }
+          }
+        },
+        {
+          "name": "Me (super admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"response matches schema\", () => pm.response.to.have.jsonSchema({\"type\": \"object\", \"required\": [\"id\", \"email\", \"full_name\", \"role\", \"is_active\", \"created_at\", \"updated_at\"], \"properties\": {\"id\": {\"type\": \"string\", \"pattern\": \"^[0-9a-f-]{36}$\"}, \"role\": {\"enum\": [\"admin\"]}}, \"not\": {\"required\": [\"hashed_password\"]}}));",
+                  "pm.test(\"is the super admin\", () => { const body = pm.response.json(); pm.expect(body.id).to.eql(pm.collectionVariables.get(\"superId\")); pm.expect(body.is_super_admin).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superToken}}",
+                  "type": "string"
+                }
+              ]
             }
           }
         },
@@ -511,8 +671,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"response matches schema\", () => pm.response.to.have.jsonSchema({\"type\": \"object\", \"required\": [\"id\", \"email\", \"full_name\", \"role\", \"is_active\", \"created_at\", \"updated_at\"], \"properties\": {\"id\": {\"type\": \"string\", \"pattern\": \"^[0-9a-f-]{36}$\"}, \"role\": {\"enum\": [\"admin\", \"member\"]}}, \"not\": {\"required\": [\"hashed_password\"]}}));",
-                  "pm.test(\"is the admin\", () => { const body = pm.response.json(); pm.expect(body.id).to.eql(pm.collectionVariables.get(\"adminId\")); });"
+                  "pm.test(\"response matches schema\", () => pm.response.to.have.jsonSchema({\"type\": \"object\", \"required\": [\"id\", \"email\", \"full_name\", \"role\", \"is_active\", \"created_at\", \"updated_at\"], \"properties\": {\"id\": {\"type\": \"string\", \"pattern\": \"^[0-9a-f-]{36}$\"}, \"role\": {\"enum\": [\"admin\"]}}, \"not\": {\"required\": [\"hashed_password\"]}}));",
+                  "pm.test(\"is the admin\", () => { const body = pm.response.json(); pm.expect(body.id).to.eql(pm.collectionVariables.get(\"adminId\")); pm.expect(body.is_super_admin).to.eql(false); });"
                 ]
               }
             }
@@ -543,7 +703,7 @@
           }
         },
         {
-          "name": "Me (member)",
+          "name": "Me (second admin)",
           "event": [
             {
               "listen": "test",
@@ -551,7 +711,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"is the member\", () => { const body = pm.response.json(); pm.expect(body.full_name).to.eql(\"Max Member\"); });"
+                  "pm.test(\"response matches schema\", () => pm.response.to.have.jsonSchema({\"type\": \"object\", \"required\": [\"id\", \"email\", \"full_name\", \"role\", \"is_active\", \"created_at\", \"updated_at\"], \"properties\": {\"id\": {\"type\": \"string\", \"pattern\": \"^[0-9a-f-]{36}$\"}, \"role\": {\"enum\": [\"admin\"]}}, \"not\": {\"required\": [\"hashed_password\"]}}));",
+                  "pm.test(\"is the second admin\", () => { const body = pm.response.json(); pm.expect(body.full_name).to.eql(\"Max Admin\"); });"
                 ]
               }
             }
@@ -574,7 +735,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{memberToken}}",
+                  "value": "{{admin2Token}}",
                   "type": "string"
                 }
               ]
@@ -700,10 +861,10 @@
     },
     {
       "name": "03 Users",
-      "description": "Any user can list users; only admins can change them.",
+      "description": "Only the super admin lists everyone, creates admins and switches them on or off.",
       "item": [
         {
-          "name": "List users",
+          "name": "List users (super admin sees every admin)",
           "event": [
             {
               "listen": "test",
@@ -711,8 +872,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"response matches schema\", () => pm.response.to.have.jsonSchema({\"type\": \"object\", \"required\": [\"items\", \"total\", \"page\", \"size\"], \"properties\": {\"items\": {\"type\": \"array\", \"items\": {\"type\": \"object\", \"required\": [\"id\", \"email\", \"full_name\", \"role\", \"is_active\", \"created_at\", \"updated_at\"], \"properties\": {\"id\": {\"type\": \"string\", \"pattern\": \"^[0-9a-f-]{36}$\"}, \"role\": {\"enum\": [\"admin\", \"member\"]}}, \"not\": {\"required\": [\"hashed_password\"]}}}, \"total\": {\"type\": \"integer\"}}}));",
-                  "pm.test(\"only the member: the super admin is not a team member\", () => { const body = pm.response.json(); pm.expect(body.total).to.eql(1); pm.expect(body.items[0].email).to.eql(pm.environment.get(\"memberEmail\")); });"
+                  "pm.test(\"response matches schema\", () => pm.response.to.have.jsonSchema({\"type\": \"object\", \"required\": [\"items\", \"total\", \"page\", \"size\"], \"properties\": {\"items\": {\"type\": \"array\", \"items\": {\"type\": \"object\", \"required\": [\"id\", \"email\", \"full_name\", \"role\", \"is_active\", \"created_at\", \"updated_at\"], \"properties\": {\"id\": {\"type\": \"string\", \"pattern\": \"^[0-9a-f-]{36}$\"}, \"role\": {\"enum\": [\"admin\"]}}, \"not\": {\"required\": [\"hashed_password\"]}}}, \"total\": {\"type\": \"integer\"}}}));",
+                  "pm.test(\"both admins, no super admin\", () => { const body = pm.response.json(); pm.expect(body.total).to.eql(2); pm.expect(body.items.map(u => u.email).sort()).to.eql([pm.environment.get(\"adminEmail\"), pm.environment.get(\"admin2Email\")].sort()); pm.expect(body.items.some(u => u.is_super_admin)).to.eql(false); });"
                 ]
               }
             }
@@ -734,7 +895,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{memberToken}}",
+                  "value": "{{superToken}}",
                   "type": "string"
                 }
               ]
@@ -750,7 +911,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"finds the member\", () => { const body = pm.response.json(); pm.expect(body.items.map(u => u.full_name)).to.eql([\"Max Member\"]); });"
+                  "pm.test(\"finds the second admin\", () => { const body = pm.response.json(); pm.expect(body.items.map(u => u.full_name)).to.eql([\"Max Admin\"]); });"
                 ]
               }
             }
@@ -778,6 +939,44 @@
               "bearer": [
                 {
                   "key": "token",
+                  "value": "{{superToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Admin lists only themselves",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"only me\", () => { const body = pm.response.json(); pm.expect(body.total).to.eql(1); pm.expect(body.items[0].email).to.eql(pm.environment.get(\"adminEmail\")); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
                   "value": "{{adminToken}}",
                   "type": "string"
                 }
@@ -786,7 +985,7 @@
           }
         },
         {
-          "name": "Super admin is not managed on the Team page (404)",
+          "name": "Super admin account cannot be edited (404)",
           "event": [
             {
               "listen": "test",
@@ -807,13 +1006,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users/{{adminId}}",
+              "raw": "{{baseUrl}}/users/{{superId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "users",
-                "{{adminId}}"
+                "{{superId}}"
               ]
             },
             "auth": {
@@ -821,14 +1020,14 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{adminToken}}",
+                  "value": "{{superToken}}",
                   "type": "string"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"role\": \"member\"\n}",
+              "raw": "{\n  \"full_name\": \"Renamed\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -838,7 +1037,7 @@
           }
         },
         {
-          "name": "Member cannot update users (403)",
+          "name": "Admin cannot update users (403)",
           "event": [
             {
               "listen": "test",
@@ -846,7 +1045,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status is 403\", () => pm.response.to.have.status(403));",
-                  "pm.test(\"detail is Admin privileges required\", () => pm.expect(pm.response.json().detail).to.eql(\"Admin privileges required\"));"
+                  "pm.test(\"detail is Only the super admin can do this\", () => pm.expect(pm.response.json().detail).to.eql(\"Only the super admin can do this\"));"
                 ]
               }
             }
@@ -860,13 +1059,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users/{{adminId}}",
+              "raw": "{{baseUrl}}/users/{{admin2Id}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "users",
-                "{{adminId}}"
+                "{{admin2Id}}"
               ]
             },
             "auth": {
@@ -874,7 +1073,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{memberToken}}",
+                  "value": "{{adminToken}}",
                   "type": "string"
                 }
               ]
@@ -891,22 +1090,20 @@
           }
         },
         {
-          "name": "Admin renames member",
+          "name": "Admin cannot create users (403)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"response matches schema\", () => pm.response.to.have.jsonSchema({\"type\": \"object\", \"required\": [\"id\", \"email\", \"full_name\", \"role\", \"is_active\", \"created_at\", \"updated_at\"], \"properties\": {\"id\": {\"type\": \"string\", \"pattern\": \"^[0-9a-f-]{36}$\"}, \"role\": {\"enum\": [\"admin\", \"member\"]}}, \"not\": {\"required\": [\"hashed_password\"]}}));",
-                  "pm.test(\"still a member\", () => { const body = pm.response.json(); pm.expect(body.role).to.eql(\"member\"); });"
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));"
                 ]
               }
             }
           ],
           "request": {
-            "method": "PATCH",
+            "method": "POST",
             "header": [
               {
                 "key": "Content-Type",
@@ -914,13 +1111,12 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users/{{memberId}}",
+              "raw": "{{baseUrl}}/users",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "users",
-                "{{memberId}}"
+                "users"
               ]
             },
             "auth": {
@@ -935,7 +1131,212 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"full_name\": \"Max Member\"\n}",
+              "raw": "{\n  \"email\": \"nope@example.com\",\n  \"password\": \"{{password}}\",\n  \"full_name\": \"Nope\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Super admin renames an admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"response matches schema\", () => pm.response.to.have.jsonSchema({\"type\": \"object\", \"required\": [\"id\", \"email\", \"full_name\", \"role\", \"is_active\", \"created_at\", \"updated_at\"], \"properties\": {\"id\": {\"type\": \"string\", \"pattern\": \"^[0-9a-f-]{36}$\"}, \"role\": {\"enum\": [\"admin\"]}}, \"not\": {\"required\": [\"hashed_password\"]}}));",
+                  "pm.test(\"still an admin\", () => { const body = pm.response.json(); pm.expect(body.role).to.eql(\"admin\"); pm.expect(body.full_name).to.eql(\"Max Admin\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{admin2Id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{admin2Id}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"full_name\": \"Max Admin\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Super admin deactivates an admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"inactive\", () => pm.expect(pm.response.json().is_active).to.eql(false));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{admin2Id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{admin2Id}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_active\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Deactivated admin cannot log in",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"login refused\", () => pm.expect(pm.response.code).to.be.oneOf([400, 401, 403]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{admin2Email}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Super admin reactivates the admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"active\", () => pm.expect(pm.response.json().is_active).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{admin2Id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{admin2Id}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_active\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1040,7 +1441,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{memberToken}}",
+                  "value": "{{adminToken}}",
                   "type": "string"
                 }
               ]
@@ -1352,7 +1753,7 @@
           }
         },
         {
-          "name": "Create contact John (member, customer)",
+          "name": "Create contact John (customer)",
           "event": [
             {
               "listen": "test",
@@ -1360,7 +1761,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
-                  "pm.test(\"owner is the member\", () => { const body = pm.response.json(); pm.expect(body.owner.full_name).to.eql(\"Max Member\"); });",
+                  "pm.test(\"owner is the admin\", () => { const body = pm.response.json(); pm.expect(body.owner.full_name).to.eql(\"Ada Admin\"); });",
                   "pm.collectionVariables.set(\"johnId\", pm.response.json().id);"
                 ]
               }
@@ -1388,7 +1789,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{memberToken}}",
+                  "value": "{{adminToken}}",
                   "type": "string"
                 }
               ]
@@ -1940,7 +2341,7 @@
     },
     {
       "name": "06 Pipeline",
-      "description": "The five stages seeded by the migrations.",
+      "description": "The five stages seeded by the migrations. Only the super admin changes them.",
       "item": [
         {
           "name": "List stages",
@@ -1978,6 +2379,189 @@
                 {
                   "key": "token",
                   "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Admin cannot create a stage (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pipeline/stages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pipeline",
+                "stages"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"E2E stage\",\n  \"probability\": 50,\n  \"is_won\": false,\n  \"is_lost\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Super admin creates a stage",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"tmpStageId\", pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pipeline/stages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pipeline",
+                "stages"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"E2E stage\",\n  \"probability\": 50,\n  \"is_won\": false,\n  \"is_lost\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Admin cannot delete a stage (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/pipeline/stages/{{tmpStageId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pipeline",
+                "stages",
+                "{{tmpStageId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Super admin deletes the stage",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/pipeline/stages/{{tmpStageId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pipeline",
+                "stages",
+                "{{tmpStageId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superToken}}",
                   "type": "string"
                 }
               ]
@@ -2083,7 +2667,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{memberToken}}",
+                  "value": "{{adminToken}}",
                   "type": "string"
                 }
               ]
@@ -2740,7 +3324,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{memberToken}}",
+                  "value": "{{adminToken}}",
                   "type": "string"
                 }
               ]
@@ -3061,7 +3645,7 @@
           }
         },
         {
-          "name": "Create future task for member",
+          "name": "Create future task",
           "event": [
             {
               "listen": "prerequest",
@@ -3080,7 +3664,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
-                  "pm.test(\"assigned to member\", () => { const body = pm.response.json(); pm.expect(body.assignee.full_name).to.eql(\"Max Member\"); });",
+                  "pm.test(\"assigned to the admin\", () => { const body = pm.response.json(); pm.expect(body.assignee.full_name).to.eql(\"Ada Admin\"); });",
                   "pm.collectionVariables.set(\"demoTaskId\", pm.response.json().id);"
                 ]
               }
@@ -3115,7 +3699,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Schedule demo\",\n  \"due_date\": \"{{tomorrow}}\",\n  \"assignee_id\": \"{{memberId}}\"\n}",
+              "raw": "{\n  \"title\": \"Schedule demo\",\n  \"due_date\": \"{{tomorrow}}\",\n  \"assignee_id\": \"{{adminId}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3267,35 +3851,33 @@
           }
         },
         {
-          "name": "Filter tasks by assignee",
+          "name": "Assigning to another admin is 403",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"member's task\", () => { const body = pm.response.json(); pm.expect(body.items.map(t => t.title)).to.eql([\"Schedule demo\"]); });"
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));"
                 ]
               }
             }
           ],
           "request": {
-            "method": "GET",
-            "header": [],
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
-              "raw": "{{baseUrl}}/tasks?assignee_id={{memberId}}",
+              "raw": "{{baseUrl}}/tasks",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "tasks"
-              ],
-              "query": [
-                {
-                  "key": "assignee_id",
-                  "value": "{{memberId}}"
-                }
               ]
             },
             "auth": {
@@ -3307,6 +3889,15 @@
                   "type": "string"
                 }
               ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Not yours\",\n  \"assignee_id\": \"{{admin2Id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         },
@@ -3410,7 +4001,7 @@
     },
     {
       "name": "10 Dashboard",
-      "description": "Numbers match what this run created.",
+      "description": "Numbers match what this run created. Admins see only their own; the super admin sees all.",
       "item": [
         {
           "name": "Summary (admin)",
@@ -3429,7 +4020,7 @@
                   "pm.test(\"every stage listed\", () => { const body = pm.response.json(); pm.expect(body.pipeline_by_stage.length).to.eql(5); });",
                   "pm.test(\"per stage counts and totals\", () => { const body = pm.response.json(); const s = Object.fromEntries(body.pipeline_by_stage.map(r => [r.stage_name, r])); pm.expect(s.Qualification.deal_count).to.eql(0); pm.expect(s.Proposal.total_value).to.eql(8000); pm.expect(s.Won.total_value).to.eql(15000.5); pm.expect(s.Lost.deal_count).to.eql(1); });",
                   "pm.test(\"recent activities\", () => { const body = pm.response.json(); pm.expect(body.recent_activities.length).to.eql(2); });",
-                  "pm.test(\"admin's open tasks\", () => { const body = pm.response.json(); pm.expect(body.my_tasks.map(t => t.title)).to.eql([\"Prepare contract\"]); });"
+                  "pm.test(\"admin's open tasks\", () => { const body = pm.response.json(); pm.expect(body.my_tasks.map(t => t.title).sort()).to.eql([\"Prepare contract\", \"Schedule demo\"]); });"
                 ]
               }
             }
@@ -3460,7 +4051,7 @@
           }
         },
         {
-          "name": "Summary (member)",
+          "name": "Summary (second admin sees nothing of the first)",
           "event": [
             {
               "listen": "test",
@@ -3468,7 +4059,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"member's open tasks\", () => { const body = pm.response.json(); pm.expect(body.my_tasks.map(t => t.title)).to.eql([\"Schedule demo\"]); });"
+                  "pm.test(\"empty dashboard\", () => { const body = pm.response.json(); pm.expect(body.open_pipeline_value).to.eql(0); pm.expect(body.won_this_month_value).to.eql(0); pm.expect(body.new_leads_this_month).to.eql(0); pm.expect(body.overdue_tasks).to.eql(0); pm.expect(body.my_tasks).to.eql([]); pm.expect(body.recent_activities).to.eql([]); });",
+                  "pm.test(\"leaderboard is only me\", () => { const body = pm.response.json(); pm.expect(body.team.map(m => m.user.full_name)).to.eql([\"Max Admin\"]); });"
                 ]
               }
             }
@@ -3491,7 +4083,47 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{memberToken}}",
+                  "value": "{{admin2Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Summary (super admin sees every admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"totals cover the first admin\", () => { const body = pm.response.json(); pm.expect(body.open_pipeline_value).to.eql(8000); pm.expect(body.won_this_month_value).to.eql(15000.5); pm.expect(body.new_leads_this_month).to.eql(2); });",
+                  "pm.test(\"leaderboard lists both admins\", () => { const body = pm.response.json(); pm.expect(body.team.map(m => m.user.full_name).sort()).to.eql([\"Ada Admin\", \"Max Admin\"]); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/dashboard/summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "dashboard",
+                "summary"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superToken}}",
                   "type": "string"
                 }
               ]
@@ -3502,7 +4134,7 @@
     },
     {
       "name": "11 AI",
-      "description": "DEEPSEEK_API_KEY is empty in e2e, so every AI endpoint answers 503.",
+      "description": "DEEPSEEK_API_KEY is empty in e2e, so every AI endpoint answers 503. The super admin can read any admin's chats, nobody else.",
       "item": [
         {
           "name": "Score contact is 503 without key",
@@ -3819,7 +4451,7 @@
           }
         },
         {
-          "name": "Members cannot list everyone's chats (403)",
+          "name": "Admins cannot list everyone's chats (403)",
           "event": [
             {
               "listen": "test",
@@ -3840,7 +4472,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{memberToken}}",
+                  "value": "{{adminToken}}",
                   "type": "string"
                 }
               ]
@@ -3848,7 +4480,7 @@
           }
         },
         {
-          "name": "Admins can list everyone's chats",
+          "name": "Super admin can list everyone's chats",
           "event": [
             {
               "listen": "test",
@@ -3869,7 +4501,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{adminToken}}",
+                  "value": "{{superToken}}",
                   "type": "string"
                 }
               ]
@@ -3995,7 +4627,7 @@
     },
     {
       "name": "12 Webhooks",
-      "description": "Event list for everyone; subscriptions are admin-only.",
+      "description": "Event list for everyone; subscriptions are for the super admin only.",
       "item": [
         {
           "name": "List events",
@@ -4030,7 +4662,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{memberToken}}",
+                  "value": "{{adminToken}}",
                   "type": "string"
                 }
               ]
@@ -4038,7 +4670,7 @@
           }
         },
         {
-          "name": "Member cannot create webhook (403)",
+          "name": "Admin cannot create webhook (403)",
           "event": [
             {
               "listen": "test",
@@ -4072,7 +4704,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{memberToken}}",
+                  "value": "{{adminToken}}",
                   "type": "string"
                 }
               ]
@@ -4123,7 +4755,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{adminToken}}",
+                  "value": "{{superToken}}",
                   "type": "string"
                 }
               ]
@@ -4140,7 +4772,7 @@
           }
         },
         {
-          "name": "Admin creates webhook (inactive)",
+          "name": "Super admin creates webhook (inactive)",
           "event": [
             {
               "listen": "test",
@@ -4178,7 +4810,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{adminToken}}",
+                  "value": "{{superToken}}",
                   "type": "string"
                 }
               ]
@@ -4195,7 +4827,7 @@
           }
         },
         {
-          "name": "Admin updates webhook",
+          "name": "Super admin updates webhook",
           "event": [
             {
               "listen": "test",
@@ -4231,7 +4863,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{adminToken}}",
+                  "value": "{{superToken}}",
                   "type": "string"
                 }
               ]
@@ -4248,7 +4880,7 @@
           }
         },
         {
-          "name": "Admin lists webhooks",
+          "name": "Super admin lists webhooks",
           "event": [
             {
               "listen": "test",
@@ -4279,7 +4911,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{adminToken}}",
+                  "value": "{{superToken}}",
                   "type": "string"
                 }
               ]
@@ -4287,7 +4919,7 @@
           }
         },
         {
-          "name": "Member cannot list webhooks (403)",
+          "name": "Admin cannot list webhooks (403)",
           "event": [
             {
               "listen": "test",
@@ -4316,7 +4948,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{memberToken}}",
+                  "value": "{{adminToken}}",
                   "type": "string"
                 }
               ]
@@ -4340,7 +4972,7 @@
                   "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
                   "pm.test(\"response matches schema\", () => pm.response.to.have.jsonSchema({\"type\": \"object\", \"required\": [\"id\", \"first_name\", \"last_name\", \"email\", \"status\", \"source\", \"tags\", \"company_id\", \"company\", \"owner_id\", \"owner\", \"ai_score\", \"ai_summary\", \"ai_scored_at\"], \"properties\": {\"id\": {\"type\": \"string\", \"pattern\": \"^[0-9a-f-]{36}$\"}, \"status\": {\"enum\": [\"lead\", \"prospect\", \"customer\", \"churned\"]}, \"tags\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"owner\": {\"type\": [\"object\", \"null\"], \"required\": [\"id\", \"full_name\"]}}}));",
                   "pm.test(\"lead from web form with new company\", () => { const body = pm.response.json(); pm.expect(body.status).to.eql(\"lead\"); pm.expect(body.source).to.eql(\"web_form\"); pm.expect(body.company.name).to.eql(\"Initech\"); });",
-                  "pm.test(\"owned by the service account\", () => { const body = pm.response.json(); pm.expect(body.owner.full_name).to.eql(\"Automation (n8n)\"); });",
+                  "pm.test(\"owned by the chosen admin\", () => { const body = pm.response.json(); pm.expect(body.owner.full_name).to.eql(\"Ada Admin\"); });",
                   "pm.collectionVariables.set(\"leadId\", pm.response.json().id);",
                   "pm.collectionVariables.set(\"initechId\", pm.response.json().company_id);"
                 ]
@@ -4374,7 +5006,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"first_name\": \"Leo\",\n  \"last_name\": \"Lead\",\n  \"email\": \"leo@initech.example.com\",\n  \"company_name\": \"Initech\",\n  \"message\": \"Please call me back.\"\n}",
+              "raw": "{\n  \"first_name\": \"Leo\",\n  \"last_name\": \"Lead\",\n  \"email\": \"leo@initech.example.com\",\n  \"company_name\": \"Initech\",\n  \"message\": \"Please call me back.\",\n  \"owner_id\": \"{{adminId}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4588,7 +5220,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"service account\", () => { const body = pm.response.json(); pm.expect(body.email).to.eql(\"automation@auto-crm.local\"); pm.expect(body.role).to.eql(\"member\"); });"
+                  "pm.test(\"service account\", () => { const body = pm.response.json(); pm.expect(body.email).to.eql(\"automation@auto-crm.local\"); pm.expect(body.role).to.eql(\"admin\"); });"
                 ]
               }
             }
@@ -5046,7 +5678,7 @@
           }
         },
         {
-          "name": "Forgot password (member)",
+          "name": "Forgot password (second admin)",
           "event": [
             {
               "listen": "test",
@@ -5072,7 +5704,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"{{memberEmail}}\"\n}",
+              "raw": "{\n  \"email\": \"{{admin2Email}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5100,7 +5732,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{mailpitUrl}}/api/v1/search?query=to:{{memberEmail}}%20subject:%22Reset%20your%20Auto%20CRM%20password%22",
+            "url": "{{mailpitUrl}}/api/v1/search?query=to:{{admin2Email}}%20subject:%22Reset%20your%20Auto%20CRM%20password%22",
             "auth": {
               "type": "noauth"
             }
@@ -5194,7 +5826,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"{{memberEmail}}\",\n  \"password\": \"a-brand-new-password\"\n}",
+              "raw": "{\n  \"email\": \"{{admin2Email}}\",\n  \"password\": \"a-brand-new-password\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5279,7 +5911,952 @@
       ]
     },
     {
-      "name": "15 Cleanup",
+      "name": "15 Roles and isolation",
+      "description": "The super admin reads everything and changes nothing. Admins see only their own records.",
+      "item": [
+        {
+          "name": "Super admin reads the admin's contacts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"sees Jane and John\", () => { const ids = pm.response.json().items.map(x => x.id); pm.expect(ids).to.include(pm.collectionVariables.get(\"janeId\")); pm.expect(ids).to.include(pm.collectionVariables.get(\"johnId\")); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/contacts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "contacts"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Super admin cannot create a contact (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"detail explains it\", () => pm.expect(pm.response.json().detail).to.eql(\"The super admin can view data but not change it\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/contacts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "contacts"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"Nope\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Super admin cannot create a company (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"detail explains it\", () => pm.expect(pm.response.json().detail).to.eql(\"The super admin can view data but not change it\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/companies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "companies"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Nope\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Super admin cannot create a deal (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"detail explains it\", () => pm.expect(pm.response.json().detail).to.eql(\"The super admin can view data but not change it\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/deals",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "deals"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Nope\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Super admin cannot create a task (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"detail explains it\", () => pm.expect(pm.response.json().detail).to.eql(\"The super admin can view data but not change it\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tasks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tasks"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Nope\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Super admin cannot log an activity (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"detail explains it\", () => pm.expect(pm.response.json().detail).to.eql(\"The super admin can view data but not change it\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/activities",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "activities"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"note\",\n  \"subject\": \"Nope\",\n  \"contact_id\": \"{{janeId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Super admin cannot update a contact (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"detail explains it\", () => pm.expect(pm.response.json().detail).to.eql(\"The super admin can view data but not change it\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/contacts/{{janeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "contacts",
+                "{{janeId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"job_title\": \"Nope\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Super admin cannot delete a deal (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"detail explains it\", () => pm.expect(pm.response.json().detail).to.eql(\"The super admin can view data but not change it\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/deals/{{pilotDealId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "deals",
+                "{{pilotDealId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Super admin cannot send email (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emails",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emails"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contact_id\": \"{{janeId}}\",\n  \"subject\": \"Nope\",\n  \"body\": \"Nope\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Second admin sees no contacts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"empty\", () => pm.expect(pm.response.json().total).to.eql(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/contacts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "contacts"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin2Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Second admin cannot read Jane (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/contacts/{{janeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "contacts",
+                "{{janeId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin2Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Second admin cannot read the pilot deal (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/deals/{{pilotDealId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "deals",
+                "{{pilotDealId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin2Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Second admin cannot read Acme (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/companies/{{acmeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "companies",
+                "{{acmeId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin2Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Second admin cannot read a task (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tasks/{{contractTaskId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tasks",
+                "{{contractTaskId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin2Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Second admin cannot update Jane (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/contacts/{{janeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "contacts",
+                "{{janeId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin2Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"job_title\": \"Nope\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Second admin cannot delete Jane (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/contacts/{{janeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "contacts",
+                "{{janeId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin2Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Second admin cannot assign a task to the first (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tasks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tasks"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin2Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Not yours\",\n  \"assignee_id\": \"{{adminId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Second admin creates their own contact",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"owner is the second admin\", () => pm.expect(pm.response.json().owner.full_name).to.eql(\"Max Admin\"));",
+                  "pm.collectionVariables.set(\"zedId\", pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/contacts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "contacts"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin2Token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"Zed\",\n  \"email\": \"zed@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "First admin cannot read Zed (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/contacts/{{zedId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "contacts",
+                "{{zedId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Super admin reads Zed",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/contacts/{{zedId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "contacts",
+                "{{zedId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Second admin deletes Zed",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/contacts/{{zedId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "contacts",
+                "{{zedId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin2Token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "16 Cleanup",
       "description": "Delete everything this run created and check it is gone.",
       "item": [
         {
@@ -5397,7 +6974,7 @@
           }
         },
         {
-          "name": "Delete member task",
+          "name": "Delete demo task",
           "event": [
             {
               "listen": "test",
@@ -5807,7 +7384,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{adminToken}}",
+                  "value": "{{superToken}}",
                   "type": "string"
                 }
               ]
@@ -5999,7 +7576,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{adminToken}}",
+                  "value": "{{superToken}}",
                   "type": "string"
                 }
               ]
@@ -6088,11 +7665,19 @@
   ],
   "variable": [
     {
+      "key": "superToken",
+      "value": ""
+    },
+    {
       "key": "adminToken",
       "value": ""
     },
     {
-      "key": "memberToken",
+      "key": "admin2Token",
+      "value": ""
+    },
+    {
+      "key": "superId",
       "value": ""
     },
     {
@@ -6100,7 +7685,7 @@
       "value": ""
     },
     {
-      "key": "memberId",
+      "key": "admin2Id",
       "value": ""
     },
     {

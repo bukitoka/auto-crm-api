@@ -1,3 +1,5 @@
+import uuid
+
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -10,4 +12,5 @@ class LeadIntake(BaseModel):
     phone: str | None = Field(default=None, max_length=50)
     company_name: str | None = Field(default=None, max_length=200)
     message: str | None = Field(default=None, max_length=5000)
+    owner_id: uuid.UUID | None = None  # the admin who should own the lead
     source: str = Field(default="web_form", max_length=50)

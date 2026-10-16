@@ -23,8 +23,6 @@ from tests.unit.conftest import (
     mock_repos,
 )
 
-# --- IntegrationService.ingest_lead ---
-
 
 @pytest.fixture
 def integrations(session: AsyncMock) -> IntegrationService:
@@ -114,9 +112,6 @@ async def test_lead_without_message_adds_no_note(integrations: IntegrationServic
     integrations.activities.add.assert_not_awaited()
 
 
-# --- DashboardService.summary ---
-
-
 async def test_dashboard_summary_combines_the_repository_numbers(session: AsyncMock) -> None:
     user = make_user()
     stage = make_stage("Proposal")
@@ -203,9 +198,6 @@ async def test_dashboard_rates_are_null_without_closed_deals(session: AsyncMock)
     assert (summary.win_rate, summary.average_deal_size) == (None, None)
 
 
-# --- PipelineService ---
-
-
 async def test_pipeline_lists_stages_with_deal_counts(session: AsyncMock) -> None:
     service = PipelineService(session)
     mock_repos(service, "repo")
@@ -219,9 +211,6 @@ async def test_pipeline_lists_stages_with_deal_counts(session: AsyncMock) -> Non
         ("Qualification", 3),
         ("Won", 0),
     ]
-
-
-# --- Seeder safety ---
 
 
 @pytest.mark.parametrize(

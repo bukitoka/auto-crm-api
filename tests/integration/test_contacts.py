@@ -14,7 +14,6 @@ async def test_contact_crud(client: AsyncClient, admin_headers: dict[str, str]) 
     assert company.status_code == 201
     company_id = company.json()["id"]
 
-    # Create
     created = await client.post(
         "/api/v1/contacts",
         json={
@@ -33,7 +32,6 @@ async def test_contact_crud(client: AsyncClient, admin_headers: dict[str, str]) 
     assert contact["company"] == {"id": company_id, "name": "Acme Inc"}
     assert contact["owner"]["full_name"] == "Ada Admin"
 
-    # Read
     fetched = await client.get(f"/api/v1/contacts/{contact['id']}", headers=admin_headers)
     assert fetched.status_code == 200
     assert fetched.json()["tags"] == ["vip"]
@@ -48,7 +46,6 @@ async def test_contact_crud(client: AsyncClient, admin_headers: dict[str, str]) 
     assert updated.json()["status"] == "customer"
     assert updated.json()["company"] is None
 
-    # Delete
     deleted = await client.delete(f"/api/v1/contacts/{contact['id']}", headers=admin_headers)
     assert deleted.status_code == 204
     missing = await client.get(f"/api/v1/contacts/{contact['id']}", headers=admin_headers)
@@ -111,7 +108,9 @@ async def test_creating_contact_publishes_event(
 async def test_integration_lead_requires_api_key(
     client: AsyncClient, admin_headers: dict[str, str], api_key_headers: dict[str, str]
 ) -> None:
+    me = (await client.get("/api/v1/auth/me", headers=admin_headers)).json()
     lead = {
+        "owner_id": me["id"],
         "first_name": "Leo",
         "email": "leo@startup.io",
         "company_name": "Startup IO",

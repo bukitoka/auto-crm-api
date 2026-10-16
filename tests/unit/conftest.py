@@ -9,7 +9,7 @@ import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,7 +31,9 @@ NOW = datetime(2026, 1, 15, 12, 0, tzinfo=UTC)
 @pytest.fixture
 def session() -> AsyncMock:
     """A stand-in for AsyncSession: `commit`, `refresh`, ... are AsyncMocks."""
-    return AsyncMock(spec=AsyncSession)
+    mock = AsyncMock(spec=AsyncSession)
+    mock.sync_session = MagicMock(info={})
+    return mock
 
 
 @pytest.fixture
@@ -54,16 +56,13 @@ def event_names(published: list[tuple[Event, dict[str, Any]]]) -> list[Event]:
     return [event for event, _ in published]
 
 
-# --- Factories ---
-
-
 def make_user(**overrides: Any) -> User:
     values: dict[str, Any] = {
         "id": uuid.uuid7(),
         "email": "user@example.com",
         "hashed_password": "not-a-real-hash",
         "full_name": "Uma User",
-        "role": UserRole.MEMBER,
+        "role": UserRole.ADMIN,
         "is_active": True,
         "is_super_admin": False,
         "created_at": NOW,

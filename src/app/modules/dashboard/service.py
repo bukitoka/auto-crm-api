@@ -47,7 +47,9 @@ class DashboardService:
         closing_soon = await self.repo.open_deals_closing_between(
             today, today + timedelta(days=CLOSING_SOON_DAYS), limit=RECENT_LIMIT
         )
-        team = await self.repo.leaderboard(month_start)
+        team = await self.repo.leaderboard(
+            month_start, only_id=None if user.is_super_admin else user.id
+        )
         activities = await self.activities.list_recent(limit=RECENT_LIMIT)
         my_tasks = await self.tasks.list_open_for_assignee(user.id, limit=RECENT_LIMIT)
 

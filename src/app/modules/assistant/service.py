@@ -25,7 +25,7 @@ from app.modules.assistant.schemas import (
     MessageWithFiles,
     PageContext,
 )
-from app.modules.assistant.tools import TOOL_SPECS, TOOLS, ToolContext
+from app.modules.assistant.tools import TOOLS, ToolContext, tool_specs_for
 from app.modules.users.models import User
 from app.shared.pagination import Page, PageParams
 from app.shared.utils import today_utc, utc_now
@@ -56,7 +56,7 @@ class AssistantAgent:
         ]
 
         for _ in range(MAX_STEPS):
-            reply = await self.ai.chat(messages=messages, tools=TOOL_SPECS)
+            reply = await self.ai.chat(messages=messages, tools=tool_specs_for(user))
             if not reply.tool_calls:
                 return AssistantReply(reply=(reply.content or "Done.").strip(), actions=ctx.actions)
 
@@ -79,7 +79,7 @@ class AssistantAgent:
     async def _run_tool(self, ctx: ToolContext, name: str, arguments: str) -> dict[str, Any]:
         """Run one tool call. Problems go back to the model as {"error": ...} so it can recover."""
         tool = TOOLS.get(name)
-        if tool is None:
+        if tool is None or not tool.allowed_for(ctx.user):
             return {"error": f"Unknown tool {name!r}"}
         try:
             params = tool.params.model_validate_json(arguments or "{}")
@@ -98,13 +98,11 @@ class ConversationService:
         self.session = session
         self.repo = ConversationRepository(session)
 
-    # --- Reading ---
-
     async def list_page(
         self, filters: ConversationFilters, params: PageParams, *, user: User
     ) -> Page[ConversationRead]:
         if filters.scope == "all":
-            _require_admin(user)
+            _require_super_admin(user)
             owner = filters.user_id  # None = everyone
         else:
             owner = user.id
@@ -118,15 +116,17 @@ class ConversationService:
         return Page[ConversationRead].from_items(items, total, params)
 
     async def get(
-        self, conversation_id: uuid.UUID, *, user: User, with_messages: bool = False
+        self,
+        conversation_id: uuid.UUID,
+        *,
+        user: User,
+        with_messages: bool = False,
     ) -> Conversation:
-        """A conversation the user may see: their own, or any for admins (404 otherwise)."""
+        """The user's own conversation. The super admin can also read (not change) others'."""
         conversation = await self.repo.get(conversation_id, with_messages=with_messages)
-        if conversation is None or not _can_manage(user, conversation):
+        if conversation is None or not _can_access(user, conversation):
             raise NotFoundError("Conversation not found")
         return conversation
-
-    # --- Chatting ---
 
     async def start(
         self, data: MessageCreate, *, user: User, ai: AIClient, mailer: Mailer
@@ -158,7 +158,7 @@ class ConversationService:
     ) -> ChatTurn:
         conversation = await self.get(conversation_id, user=user)
         if conversation.user_id != user.id:
-            # Admins can read and manage anyone's chats, but not speak in them.
+            # The super admin can read every chat but not speak in them.
             raise PermissionDeniedError("You can only send messages in your own conversations")
         return await self._answer(conversation.id, data, user=user, ai=ai, mailer=mailer)
 
@@ -209,12 +209,11 @@ class ConversationService:
             messages=[MessageRead.model_validate(question), MessageRead.model_validate(answer)],
         )
 
-    # --- Managing ---
-
     async def update(
         self, conversation_id: uuid.UUID, data: ConversationUpdate, *, user: User
     ) -> Conversation:
         conversation = await self.get(conversation_id, user=user)
+        _require_own(user, conversation)
         for field, value in data.model_dump(exclude_unset=True, exclude_none=True).items():
             setattr(conversation, field, value)
         await self.session.commit()
@@ -222,13 +221,13 @@ class ConversationService:
 
     async def delete(self, conversation_id: uuid.UUID, *, user: User) -> None:
         conversation = await self.get(conversation_id, user=user)
+        _require_own(user, conversation)
         await self.repo.delete(conversation)
         await self.session.commit()
 
     async def bulk(self, data: BulkAction, *, user: User) -> BulkResult:
-        """Archive / restore / delete many. Admins may touch anyone's; others only their own."""
-        owner = None if user.is_admin else user.id
-        ids = await self.repo.owned_ids(data.ids, owner)
+        """Archive / restore / delete many of the user's own conversations."""
+        ids = await self.repo.owned_ids(data.ids, user.id)
         if data.action == "delete":
             await self.repo.delete_many(ids)
         else:
@@ -237,13 +236,18 @@ class ConversationService:
         return BulkResult(affected=len(ids))
 
 
-def _can_manage(user: User, conversation: Conversation) -> bool:
-    return conversation.user_id == user.id or user.is_admin
+def _can_access(user: User, conversation: Conversation) -> bool:
+    return conversation.user_id == user.id or user.is_super_admin
 
 
-def _require_admin(user: User) -> None:
-    if not user.is_admin:
-        raise PermissionDeniedError("Admin privileges required")
+def _require_own(user: User, conversation: Conversation) -> None:
+    if conversation.user_id != user.id:
+        raise PermissionDeniedError("You can only change your own conversations")
+
+
+def _require_super_admin(user: User) -> None:
+    if not user.is_super_admin:
+        raise PermissionDeniedError("Only the super admin can read other people's chats")
 
 
 def _title_from(text: str) -> str:
@@ -277,9 +281,9 @@ def _model_content(content: str, attachments: list[dict[str, Any]]) -> str:
 def _system_prompt(user: User, context: PageContext | None) -> str:
     today = today_utc()
     context_line = prompts.CONTEXT_LINE.format(type=context.type, id=context.id) if context else ""
-    return prompts.ASSISTANT_SYSTEM.format(
+    template = prompts.SUPER_ADMIN_SYSTEM if user.is_super_admin else prompts.ADMIN_SYSTEM
+    return template.format(
         user_name=user.full_name,
-        user_role=user.role,
         today=today.isoformat(),
         weekday=today.strftime("%A"),
         context=context_line,

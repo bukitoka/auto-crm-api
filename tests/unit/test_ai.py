@@ -33,8 +33,6 @@ from tests.unit.conftest import (
     mock_repos,
 )
 
-# --- AIClient ---
-
 
 def _client_returning(content: str | None) -> AIClient:
     client = AIClient(api_key="key", base_url="http://ai.local", model="test-model")
@@ -124,9 +122,6 @@ async def test_a_stuck_provider_call_times_out_with_502(monkeypatch: pytest.Monk
         await client.complete_json(system="s", user="u", schema=LeadScore)
 
 
-# --- get_ai_client ---
-
-
 def test_missing_api_key_disables_ai_with_503(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "deepseek_api_key", "")
 
@@ -143,9 +138,6 @@ def test_configured_api_key_returns_a_cached_client(monkeypatch: pytest.MonkeyPa
     assert isinstance(client, AIClient)
     assert client.model == settings.deepseek_model
     assert dependencies.get_ai_client() is client
-
-
-# --- AIService ---
 
 
 class FakeAIClient:

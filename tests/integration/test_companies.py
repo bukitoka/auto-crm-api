@@ -52,12 +52,12 @@ async def test_list_companies_filters_by_search_and_industry(
 
 
 async def test_company_with_unknown_owner_is_404(
-    client: AsyncClient, admin_headers: dict[str, str]
+    client: AsyncClient, api_key_headers: dict[str, str]
 ) -> None:
     response = await client.post(
         "/api/v1/companies",
         json={"name": "Acme", "owner_id": "00000000-0000-0000-0000-000000000000"},
-        headers=admin_headers,
+        headers=api_key_headers,
     )
     assert response.status_code == 404
     assert response.json() == {"detail": "Owner not found"}

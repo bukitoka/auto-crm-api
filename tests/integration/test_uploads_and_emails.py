@@ -27,9 +27,6 @@ async def create_contact(client: AsyncClient, headers: dict[str, str], **values:
     return response.json()
 
 
-# --- Images ---
-
-
 async def test_contact_avatar_upload_and_delete(
     client: AsyncClient, admin_headers: dict[str, str], storage: FakeStorage
 ) -> None:
@@ -123,9 +120,6 @@ async def test_my_avatar_shows_up_on_owned_records(
     assert storage.files == {}
 
 
-# --- Emailing contacts ---
-
-
 async def test_send_email_to_contact_logs_activity(
     client: AsyncClient, admin_headers: dict[str, str], mailer: FakeMailer
 ) -> None:
@@ -170,9 +164,6 @@ async def test_send_email_validation(
     )
     assert empty.status_code == 422
     assert mailer.outbox == []
-
-
-# --- Password reset ---
 
 
 async def test_password_reset_flow(

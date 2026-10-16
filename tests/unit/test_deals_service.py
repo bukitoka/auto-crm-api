@@ -46,9 +46,6 @@ def _reload_with_stage(service: DealService, deal: Any) -> None:
     service.repo.get.side_effect = get
 
 
-# --- create ---
-
-
 async def test_create_uses_first_open_stage_usd_and_current_user(
     service: DealService, published_events: Published
 ) -> None:
@@ -116,9 +113,6 @@ async def test_create_with_unknown_reference_is_not_found(
         await service.create(
             DealCreate.model_validate({"title": "Deal", field: make_user().id}), user=make_user()
         )
-
-
-# --- stage changes ---
 
 
 async def test_moving_to_won_sets_closed_at_and_emits_events(
@@ -211,9 +205,6 @@ async def test_patch_without_stage_emits_nothing(
 
     assert deal.title == "Renamed"
     assert published_events == []
-
-
-# --- get / list / delete ---
 
 
 async def test_get_unknown_deal_is_not_found(service: DealService) -> None:

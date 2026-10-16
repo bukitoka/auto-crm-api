@@ -1,3 +1,4 @@
+import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -102,8 +103,10 @@ class DashboardRepository:
         )
         return list(result.scalars())
 
-    async def leaderboard(self, month_start: datetime) -> list[Row]:
-        """Per active user: (User, open_deals_value, won_this_month_value, open_tasks)."""
+    async def leaderboard(
+        self, month_start: datetime, *, only_id: uuid.UUID | None = None
+    ) -> list[Row]:
+        """Per active admin (or just `only_id`): (User, open value, won this month, open tasks)."""
         deals = (
             select(
                 Deal.owner_id,
@@ -127,7 +130,7 @@ class DashboardRepository:
         )
         won_value = func.coalesce(deals.c.won_value, 0).label("won_this_month_value")
         open_value = func.coalesce(deals.c.open_value, 0).label("open_deals_value")
-        result = await self.session.execute(
+        people = (
             select(
                 User,
                 open_value,
@@ -143,6 +146,9 @@ class DashboardRepository:
             )
             .order_by(won_value.desc(), open_value.desc(), User.full_name)
         )
+        if only_id is not None:
+            people = people.where(User.id == only_id)
+        result = await self.session.execute(people)
         return list(result.all())
 
     async def pipeline_by_stage(self) -> list[Row]:

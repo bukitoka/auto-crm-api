@@ -4,6 +4,7 @@ from sqlalchemy import Select, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from app.core.access import SKIP_SCOPE
 from app.modules.companies.models import Company
 from app.modules.contacts.models import Contact, ContactStatus
 from app.modules.contacts.schemas import ContactFilters
@@ -41,7 +42,11 @@ class ContactRepository:
         return await self.session.get(Contact, contact_id) is not None
 
     async def get_by_email(self, email: str) -> Contact | None:
-        result = await self.session.execute(select(Contact).where(Contact.email == email.lower()))
+        # Emails are unique across all owners, so look beyond the caller's own contacts.
+        result = await self.session.execute(
+            select(Contact).where(Contact.email == email.lower()),
+            execution_options={SKIP_SCOPE: True},
+        )
         return result.scalar_one_or_none()
 
     async def list_page(

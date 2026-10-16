@@ -20,9 +20,6 @@ def _upload(content: str) -> dict:
     return {"file": ("data.csv", content.encode(), "text/csv")}
 
 
-# --- sorting ---
-
-
 async def test_contacts_sort_by_name_company_and_status(
     client: AsyncClient, admin_headers: dict[str, str]
 ) -> None:
@@ -143,9 +140,6 @@ async def test_tasks_sort_by_priority_and_due_date(
     assert await titles("sort=created_at&order=desc") == ["C", "B", "A"]
 
 
-# --- export ---
-
-
 async def test_export_contacts_honors_filters_and_sort(
     client: AsyncClient, admin_headers: dict[str, str]
 ) -> None:
@@ -217,9 +211,6 @@ async def test_export_companies_deals_and_tasks(
 async def test_export_requires_authentication(client: AsyncClient) -> None:
     response = await client.get("/api/v1/contacts/export")
     assert response.status_code == 401
-
-
-# --- import ---
 
 
 async def test_import_contacts_links_companies_and_skips_bad_rows(

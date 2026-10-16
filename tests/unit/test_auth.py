@@ -4,12 +4,12 @@ import pytest
 from fastapi.security import HTTPAuthorizationCredentials
 
 from app.core import security
+from app.core.access import Scope, get_scope
 from app.core.config import settings
 from app.core.exceptions import AuthenticationError, PermissionDeniedError
 from app.modules.auth import dependencies
-from app.modules.auth.schemas import LoginRequest, RegisterRequest
+from app.modules.auth.schemas import LoginRequest
 from app.modules.auth.service import AuthService
-from app.modules.users.models import UserRole
 from tests.unit.conftest import make_user
 
 
@@ -29,19 +29,6 @@ def api_key(monkeypatch: pytest.MonkeyPatch) -> str:
 
 def _bearer(token: str) -> HTTPAuthorizationCredentials:
     return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-
-
-# --- AuthService ---
-
-
-async def test_register_delegates_to_user_service(service: AuthService) -> None:
-    data = RegisterRequest(email="new@example.com", password="password123", full_name="New")
-
-    await service.register(data)
-
-    service.users.create.assert_awaited_once_with(
-        email="new@example.com", password="password123", full_name="New"
-    )
 
 
 async def test_login_returns_a_token_for_valid_credentials(service: AuthService) -> None:
@@ -105,57 +92,84 @@ async def test_service_account_comes_from_user_service(service: AuthService) -> 
     assert await service.service_account() is account
 
 
-# --- get_current_user: API key wins over JWT ---
-
-
 async def test_valid_api_key_authenticates_as_service_account(
-    service: AuthService, api_key: str
+    service: AuthService, session: AsyncMock, api_key: str
 ) -> None:
     account = make_user(email="automation@auto-crm.local")
     service.users.get_or_create_service_account.return_value = account
 
-    user = await dependencies.get_current_user(service, bearer=None, api_key=api_key)
+    user = await dependencies.get_current_user(service, session, bearer=None, api_key=api_key)
 
     assert user is account
 
 
 async def test_invalid_api_key_is_rejected_even_with_a_valid_jwt(
-    service: AuthService, api_key: str
+    service: AuthService, session: AsyncMock, api_key: str
 ) -> None:
     token = security.create_access_token(make_user().id)
 
     with pytest.raises(AuthenticationError, match="Invalid API key"):
-        await dependencies.get_current_user(service, bearer=_bearer(token), api_key="wrong")
+        await dependencies.get_current_user(
+            service, session, bearer=_bearer(token), api_key="wrong"
+        )
 
 
-async def test_bearer_token_authenticates_the_user(service: AuthService) -> None:
+async def test_service_account_stays_unscoped(
+    service: AuthService, session: AsyncMock, api_key: str
+) -> None:
+    service.users.get_or_create_service_account.return_value = make_user()
+
+    await dependencies.get_current_user(service, session, bearer=None, api_key=api_key)
+
+    assert get_scope(session) is None
+
+
+async def test_admin_token_scopes_the_session_to_their_records(
+    service: AuthService, session: AsyncMock
+) -> None:
     user = make_user()
     service.user_repo.get.return_value = user
     token = security.create_access_token(user.id)
 
-    assert await dependencies.get_current_user(service, bearer=_bearer(token), api_key=None) is user
+    result = await dependencies.get_current_user(
+        service, session, bearer=_bearer(token), api_key=None
+    )
+
+    assert result is user
+    assert get_scope(session) == Scope(owner_id=user.id)
 
 
-async def test_no_credentials_is_unauthenticated(service: AuthService) -> None:
+async def test_super_admin_token_makes_the_session_read_only(
+    service: AuthService, session: AsyncMock
+) -> None:
+    root = make_user(is_super_admin=True)
+    service.user_repo.get.return_value = root
+    token = security.create_access_token(root.id)
+
+    await dependencies.get_current_user(service, session, bearer=_bearer(token), api_key=None)
+
+    assert get_scope(session) == Scope(read_only=True)
+
+
+async def test_no_credentials_is_unauthenticated(service: AuthService, session: AsyncMock) -> None:
     with pytest.raises(AuthenticationError, match="Not authenticated"):
-        await dependencies.get_current_user(service, bearer=None, api_key=None)
+        await dependencies.get_current_user(service, session, bearer=None, api_key=None)
 
 
-# --- require_admin / require_api_key ---
+async def test_working_user_allows_admins_and_rejects_the_super_admin() -> None:
+    admin = make_user()
+    assert await dependencies.require_working_user(admin) is admin
+
+    with pytest.raises(PermissionDeniedError, match="view data but not change"):
+        await dependencies.require_working_user(make_user(is_super_admin=True))
 
 
-@pytest.mark.parametrize(
-    "overrides", [{"role": UserRole.ADMIN}, {"is_super_admin": True}], ids=["admin", "super_admin"]
-)
-async def test_require_admin_allows_admins_and_super_admins(overrides: dict) -> None:
-    admin = make_user(**overrides)
+async def test_super_admin_guard_rejects_admins() -> None:
+    root = make_user(is_super_admin=True)
+    assert await dependencies.require_super_admin(root) is root
 
-    assert await dependencies.require_admin(admin) is admin
-
-
-async def test_require_admin_rejects_members() -> None:
-    with pytest.raises(PermissionDeniedError, match="Admin privileges required"):
-        await dependencies.require_admin(make_user(role=UserRole.MEMBER))
+    with pytest.raises(PermissionDeniedError, match="Only the super admin"):
+        await dependencies.require_super_admin(make_user())
 
 
 async def test_require_api_key_accepts_the_configured_key(

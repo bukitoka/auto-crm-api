@@ -11,7 +11,7 @@ from app.shared.models import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class Conversation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """A saved chat with the assistant. Belongs to one user; admins can manage all of them."""
+    """A saved chat with the assistant. Only its owner can change it."""
 
     __tablename__ = "assistant_conversations"
 
