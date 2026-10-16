@@ -140,14 +140,25 @@ async def test_delete_failure_is_only_logged(storage: Storage) -> None:
     await storage.delete("a.webp")  # does not raise
 
 
-def test_url_is_presigned_for_the_public_host_and_stable() -> None:
+def test_url_is_presigned_for_the_public_host_and_stable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "s3_public_url", "https://cdn.example.com")
     storage = Storage(settings)
 
     url = storage.url("contacts/1/a.webp")
 
-    assert url.startswith(f"{settings.s3_public_url}/{settings.s3_bucket}/contacts/1/a.webp?")
+    assert url.startswith(f"https://cdn.example.com/{settings.s3_bucket}/contacts/1/a.webp?")
     assert "X-Amz-Signature=" in url
     assert storage.url("contacts/1/a.webp") == url  # same hour, same URL (browser cache)
+
+
+def test_url_falls_back_to_endpoint_when_public_url_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "s3_public_url", "")
+    monkeypatch.setattr(settings, "s3_endpoint", "localhost:9100")
+    storage = Storage(settings)
+
+    url = storage.url("contacts/1/a.webp")
+
+    assert url.startswith(f"http://localhost:9100/{settings.s3_bucket}/contacts/1/a.webp?")
 
 
 def test_image_url_handles_missing_keys() -> None:
