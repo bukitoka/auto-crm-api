@@ -1,8 +1,8 @@
-"""Object storage for uploaded files (MinIO, or any S3-compatible service).
+"""Object storage for uploaded files (Neon object storage, MinIO, or any S3-compatible service).
 
 Files live in one private bucket. The database stores only the object *key*
 (e.g. `contacts/<id>/<uuid>.webp`); API responses turn keys into short-lived
-presigned URLs that the browser can load directly from MinIO.
+presigned URLs that the browser can load directly from the storage service.
 
 The MinIO SDK is synchronous, so network calls run in a worker thread.
 """
@@ -29,25 +29,37 @@ logger = logging.getLogger(__name__)
 _URL_LIFETIME = timedelta(hours=2)
 
 
+def _split_endpoint(endpoint: str, default_secure: bool) -> tuple[str, bool]:
+    """`https://host` -> ("host", True); a bare `host:port` keeps `default_secure`."""
+    if "://" not in endpoint:
+        return endpoint, default_secure
+    parts = urlsplit(endpoint)
+    return parts.netloc, parts.scheme == "https"
+
+
 class Storage:
     def __init__(self, config: Settings) -> None:
         self.bucket = config.s3_bucket
+        self._create_bucket = config.s3_create_bucket
+        host, secure = _split_endpoint(config.s3_endpoint, config.s3_secure)
         # Used by the API itself (uploads, deletes).
         self._client = Minio(
-            config.s3_endpoint,
+            host,
             access_key=config.s3_access_key,
             secret_key=config.s3_secret_key,
-            secure=config.s3_secure,
+            secure=secure,
             region=config.s3_region,
         )
         # Only used to sign URLs for browsers. The signature includes the host, so it must
         # be signed for the public address. Setting `region` means signing needs no network.
-        public = urlsplit(config.s3_public_url)
+        public_host, public_secure = _split_endpoint(
+            config.s3_public_url or config.s3_endpoint, config.s3_secure
+        )
         self._signer = Minio(
-            public.netloc,
+            public_host,
             access_key=config.s3_access_key,
             secret_key=config.s3_secret_key,
-            secure=public.scheme == "https",
+            secure=public_secure,
             region=config.s3_region,
         )
         self._bucket_ready = False
@@ -73,7 +85,7 @@ class Storage:
         )
 
     def _put_sync(self, key: str, data: bytes, content_type: str) -> None:
-        if not self._bucket_ready:
+        if self._create_bucket and not self._bucket_ready:
             if not self._client.bucket_exists(self.bucket):
                 self._client.make_bucket(self.bucket)
             self._bucket_ready = True

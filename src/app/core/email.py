@@ -1,15 +1,19 @@
-"""In development every message lands in Mailpit (http://localhost:8026) instead of a
-real inbox. In production, point the SMTP_* settings at your email provider.
-"""
+"""Outgoing email through Brevo's transactional email API (official SDK)."""
 
 import logging
 from dataclasses import dataclass
-from email.message import EmailMessage
-from email.utils import formataddr
+from email.utils import parseaddr
 from functools import lru_cache
 from typing import Annotated
 
-import aiosmtplib
+import httpx
+from brevo import AsyncBrevo
+from brevo.core.api_error import ApiError
+from brevo.transactional_emails import (
+    SendTransacEmailRequestReplyTo,
+    SendTransacEmailRequestSender,
+    SendTransacEmailRequestToItem,
+)
 from fastapi import Depends
 
 from app.core.config import Settings, settings
@@ -28,47 +32,49 @@ class Mail:
     from_name: str | None = None  # defaults to MAIL_FROM_NAME
 
 
-class Mailer:
+class BaseMailer:
+    async def send(self, mail: Mail) -> None:
+        raise NotImplementedError
+
+
+class BrevoMailer(BaseMailer):
+    """Brevo transactional email API. The sender address must be verified in Brevo."""
+
     def __init__(self, config: Settings) -> None:
         self.config = config
-
-    def build(self, mail: Mail) -> EmailMessage:
-        message = EmailMessage()
-        message["From"] = formataddr(
-            (mail.from_name or self.config.mail_from_name, self.config.mail_from_email)
+        self._client = AsyncBrevo(
+            api_key=config.brevo_api_key, timeout=config.brevo_timeout_seconds
         )
-        message["To"] = mail.to
-        message["Subject"] = mail.subject
-        if mail.reply_to:
-            message["Reply-To"] = mail.reply_to
-        message.set_content(mail.text)
-        if mail.html:
-            message.add_alternative(mail.html, subtype="html")
-        return message
 
     async def send(self, mail: Mail) -> None:
-        config = self.config
+        name, address = parseaddr(mail.to)
         try:
-            await aiosmtplib.send(
-                self.build(mail),
-                hostname=config.smtp_host,
-                port=config.smtp_port,
-                username=config.smtp_username or None,
-                password=config.smtp_password or None,
-                start_tls=config.smtp_starttls,
-                timeout=config.smtp_timeout_seconds,
-                # The name we greet the server with (EHLO). Without it aiosmtplib calls
-                # socket.getfqdn(), which can block for 30+ seconds on some machines.
-                local_hostname=config.mail_from_email.rpartition("@")[2],
+            await self._client.transactional_emails.send_transac_email(
+                sender=SendTransacEmailRequestSender(
+                    email=self.config.mail_from_email,
+                    name=mail.from_name or self.config.mail_from_name,
+                ),
+                to=[SendTransacEmailRequestToItem(email=address, name=name or None)],
+                subject=mail.subject,
+                text_content=mail.text,
+                html_content=mail.html,
+                reply_to=self._reply_to(mail.reply_to),
             )
-        except (aiosmtplib.SMTPException, OSError) as exc:
-            logger.exception("Sending email %r to %s failed", mail.subject, mail.to)
+        except (ApiError, httpx.HTTPError) as exc:
+            logger.exception("Sending email %r to %s failed", mail.subject, address)
             raise EmailDeliveryError() from exc
+
+    @staticmethod
+    def _reply_to(value: str | None) -> SendTransacEmailRequestReplyTo | None:
+        if not value:
+            return None
+        name, address = parseaddr(value)
+        return SendTransacEmailRequestReplyTo(email=address, name=name or None)
 
 
 @lru_cache
-def get_mailer() -> Mailer:
-    return Mailer(settings)
+def get_mailer() -> BaseMailer:
+    return BrevoMailer(settings)
 
 
-MailerDep = Annotated[Mailer, Depends(get_mailer)]
+MailerDep = Annotated[BaseMailer, Depends(get_mailer)]

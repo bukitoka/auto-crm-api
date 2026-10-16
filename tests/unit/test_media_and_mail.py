@@ -1,18 +1,15 @@
 import io
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
-import aiosmtplib
 import pytest
 from fastapi import UploadFile
 from minio.error import MinioException
 from PIL import Image
 
 from app.core.config import settings
-from app.core.email import Mail, Mailer
 from app.core.exceptions import (
     BadRequestError,
-    EmailDeliveryError,
     PayloadTooLargeError,
     StorageError,
 )
@@ -127,7 +124,7 @@ async def test_put_failure_raises_storage_error(storage: Storage) -> None:
     client: Any = storage._client
     client.bucket_exists.side_effect = OSError("connection refused")
 
-    with pytest.raises(StorageError, match="MinIO"):
+    with pytest.raises(StorageError, match="not reachable"):
         await storage.put("a.webp", b"1", "image/webp")
 
 
@@ -156,51 +153,3 @@ def test_url_is_presigned_for_the_public_host_and_stable() -> None:
 def test_image_url_handles_missing_keys() -> None:
     assert image_url(None) is None
     assert image_url("x.webp") is not None
-
-
-def test_build_message() -> None:
-    mailer = Mailer(settings)
-
-    message = mailer.build(
-        Mail(
-            to="Jane <jane@acme.com>",
-            subject="Hi",
-            text="Plain",
-            html="<p>Rich</p>",
-            reply_to="me@example.com",
-            from_name="Ada via Auto CRM",
-        )
-    )
-
-    assert message["From"] == f"Ada via Auto CRM <{settings.mail_from_email}>"
-    assert message["To"] == "Jane <jane@acme.com>"
-    assert message["Reply-To"] == "me@example.com"
-    assert message.is_multipart()
-
-
-def test_build_plain_message_uses_default_sender() -> None:
-    message = Mailer(settings).build(Mail(to="a@b.com", subject="Hi", text="Plain"))
-
-    assert message["From"] == f"{settings.mail_from_name} <{settings.mail_from_email}>"
-    assert message["Reply-To"] is None
-    assert not message.is_multipart()
-
-
-async def test_send_uses_smtp_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    send = AsyncMock()
-    monkeypatch.setattr(aiosmtplib, "send", send)
-
-    await Mailer(settings).send(Mail(to="a@b.com", subject="Hi", text="Plain"))
-
-    kwargs = send.await_args.kwargs
-    assert kwargs["hostname"] == settings.smtp_host
-    assert kwargs["port"] == settings.smtp_port
-    assert kwargs["username"] is None  # empty settings mean "no login"
-    assert kwargs["local_hostname"] == settings.mail_from_email.rpartition("@")[2]
-
-
-async def test_send_failure_raises_email_delivery_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(aiosmtplib, "send", AsyncMock(side_effect=ConnectionRefusedError()))
-
-    with pytest.raises(EmailDeliveryError, match="Mailpit"):
-        await Mailer(settings).send(Mail(to="a@b.com", subject="Hi", text="Plain"))

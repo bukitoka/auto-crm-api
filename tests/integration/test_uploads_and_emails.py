@@ -1,4 +1,4 @@
-"""Storage and SMTP are the in-memory fakes from `tests/fakes.py` (see conftest)."""
+"""Storage and email are the in-memory fakes from `tests/fakes.py` (see conftest)."""
 
 import io
 import re
@@ -207,4 +207,28 @@ async def test_forgot_password_for_unknown_email_looks_the_same(
 
     assert response.status_code == 202
     assert "reset link" in response.json()["detail"]
+    assert mailer.outbox == []
+
+
+async def test_notify_sends_to_every_recipient_with_the_api_key(
+    client: AsyncClient, api_key_headers: dict[str, str], mailer: FakeMailer
+) -> None:
+    response = await client.post(
+        "/api/v1/emails/notify",
+        json={"to": ["a@example.com", "b@example.com"], "subject": "Deal won", "text": "Nice"},
+        headers=api_key_headers,
+    )
+
+    assert response.status_code == 204, response.text
+    assert [mail.to for mail in mailer.outbox] == ["a@example.com", "b@example.com"]
+
+
+async def test_notify_needs_the_api_key(
+    client: AsyncClient, admin_headers: dict[str, str], mailer: FakeMailer
+) -> None:
+    body = {"to": ["a@example.com"], "subject": "Hi", "text": "Hi"}
+
+    assert (await client.post("/api/v1/emails/notify", json=body)).status_code == 401
+    as_admin = await client.post("/api/v1/emails/notify", json=body, headers=admin_headers)
+    assert as_admin.status_code == 401
     assert mailer.outbox == []

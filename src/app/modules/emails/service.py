@@ -2,7 +2,7 @@ from email.utils import formataddr
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.email import Mail, Mailer, get_mailer
+from app.core.email import BaseMailer, Mail, get_mailer
 from app.core.exceptions import BadRequestError
 from app.modules.activities.models import Activity, ActivityType
 from app.modules.activities.schemas import ActivityCreate
@@ -13,7 +13,7 @@ from app.modules.users.models import User
 
 
 class EmailService:
-    def __init__(self, session: AsyncSession, mailer: Mailer | None = None) -> None:
+    def __init__(self, session: AsyncSession, mailer: BaseMailer | None = None) -> None:
         self.contacts = ContactService(session)
         self.activities = ActivityService(session)
         self.mailer = mailer or get_mailer()

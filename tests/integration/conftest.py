@@ -22,6 +22,7 @@ from app.core import events
 from app.core.database import SessionFactory, engine
 from app.core.email import get_mailer
 from app.core.events import Event
+from app.core.rate_limit import LIMITERS
 from app.core.storage import get_storage
 from app.main import app
 from app.modules.users.service import UserService
@@ -79,6 +80,12 @@ async def dispose_engine() -> AsyncGenerator[None]:
 
 
 @pytest.fixture(autouse=True)
+def reset_rate_limits() -> None:
+    for limiter in LIMITERS:
+        limiter.reset()
+
+
+@pytest.fixture(autouse=True)
 def storage() -> Generator[FakeStorage]:
     """Uploaded files go to memory instead of MinIO."""
     fake = FakeStorage()
@@ -89,7 +96,7 @@ def storage() -> Generator[FakeStorage]:
 
 @pytest.fixture(autouse=True)
 def mailer() -> Generator[FakeMailer]:
-    """Sent emails are collected in `mailer.outbox` instead of going to Mailpit."""
+    """Sent emails are collected in `mailer.outbox` instead of going to Brevo."""
     fake = FakeMailer()
     app.dependency_overrides[get_mailer] = lambda: fake
     yield fake

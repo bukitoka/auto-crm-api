@@ -12,15 +12,6 @@ wheels = [
 ]
 
 [[package]]
-name = "aiosmtplib"
-version = "5.1.3"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/9b/5c/9cabc5db6d607616e81ba6d8f1f231cd5a75955807a308c1090a59072d6d/aiosmtplib-5.1.3.tar.gz", hash = "sha256:ac2b418d3260ba62d9cfd0fe7359726e9dc009a4e8e8d9909fdfae332f522a7c", size = 77010, upload-time = "2026-09-08T02:11:20.532Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9c/0a/b56ab8163d54960337fdca475d3dfd56c8badf6172e79cf2ad00d5335dc1/aiosmtplib-5.1.3-py3-none-any.whl", hash = "sha256:f7d76ce3d4995a65a178c1f11e1bd1607706b921d00cb768e7a2c7f7ef5517a8", size = 30116, upload-time = "2026-09-08T02:11:19.352Z" },
-]
-
-[[package]]
 name = "alembic"
 version = "1.20.0"
 source = { registry = "https://pypi.org/simple" }
@@ -168,10 +159,10 @@ name = "auto-crm-api"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "aiosmtplib" },
     { name = "alembic" },
     { name = "asyncpg" },
     { name = "av" },
+    { name = "brevo-python" },
     { name = "fastapi", extra = ["standard"] },
     { name = "faster-whisper" },
     { name = "httpx" },
@@ -200,10 +191,10 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiosmtplib", specifier = ">=5.1.3" },
     { name = "alembic", specifier = ">=1.20.0" },
     { name = "asyncpg", specifier = ">=0.32.0" },
     { name = "av", specifier = "<17" },
+    { name = "brevo-python", specifier = ">=5.1.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.143.0" },
     { name = "faster-whisper", specifier = ">=1.2.1" },
     { name = "httpx", specifier = ">=0.28.1" },
@@ -250,6 +241,21 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/5e/f5/f6db0dd86b70167a4d55ee0d9d9640983c570d25504f2bde42599f38241e/av-16.1.0-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:cac0c074892ea97113b53556ff41c99562db7b9f09f098adac1f08318c2acad5", size = 41770481, upload-time = "2026-01-11T09:59:12.74Z" },
     { url = "https://files.pythonhosted.org/packages/9e/8b/33651d658e45e16ab7671ea5fcf3d20980ea7983234f4d8d0c63c65581a5/av-16.1.0-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:7dec3dcbc35a187ce450f65a2e0dda820d5a9e6553eea8344a1459af11c98649", size = 43036824, upload-time = "2026-01-11T09:59:16.507Z" },
     { url = "https://files.pythonhosted.org/packages/83/41/7f13361db54d7e02f11552575c0384dadaf0918138f4eaa82ea03a9f9580/av-16.1.0-cp314-cp314t-win_amd64.whl", hash = "sha256:6f90dc082ff2068ddbe77618400b44d698d25d9c4edac57459e250c16b33d700", size = 31948164, upload-time = "2026-01-11T09:59:19.501Z" },
+]
+
+[[package]]
+name = "brevo-python"
+version = "5.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "pydantic-core" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c1/c6/d12adf1cff3f9a0e1c2fd40418c597a7b0b7e5cf55a0302e07dab5c598f8/brevo_python-5.1.0.tar.gz", hash = "sha256:2dfafc749fe2ff7122355ea3c3f13879442f50a7b44f997769c2d90e1c462298", size = 527064, upload-time = "2026-10-13T16:51:57.611Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/17/93/18e0473d18e814afb8f91c9598e041b44813305b12a410fd487b523fdc3a/brevo_python-5.1.0-py3-none-any.whl", hash = "sha256:f52dba6ca8d784ff2b6250ff8dacfc58fe55143158bf97f5df3cada5d36507b3", size = 1013953, upload-time = "2026-10-13T16:51:56.087Z" },
 ]
 
 [[package]]
