@@ -7,7 +7,7 @@ requires-python = ">=3.14"
 dependencies = [
     "alembic>=1.20.0",
     "asyncpg>=0.32.0",
-    "av<17",
+    "av<20",
     "brevo-python>=5.1.0",
     "fastapi[standard]>=0.143.0",
     "faster-whisper>=1.2.1",
