@@ -1,3 +1,10 @@
+# Local development only; production uses Neon and Brevo. Ports bind to 127.0.0.1 and come from .env.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "5m"
+    max-file: "2"
+
 services:
   postgres:
     image: postgres:17
@@ -7,9 +14,22 @@ services:
       POSTGRES_DB: auto_crm
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+    # Speed over durability: a crash can lose recent writes. Never use these flags in production.
+    command:
+      - postgres
+      - -c
+      - fsync=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - full_page_writes=off
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - max_connections=50
     ports:
       # Host port is configurable (POSTGRES_PORT in .env) in case 5432 is already taken.
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -17,9 +37,10 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 5s
+    logging: *logging
 
-  # S3-compatible object storage for uploaded images (contact photos, company logos, avatars).
-  # Console: http://localhost:9101 (login with MINIO_ROOT_USER / MINIO_ROOT_PASSWORD).
+  # S3-compatible storage for uploaded images. The API creates its bucket on first upload.
   minio:
     image: chainguard/minio:latest
     container_name: auto-crm-minio
@@ -28,12 +49,46 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      # Gives the healthcheck's mc an alias without a config file (the image has no shell).
+      MC_HOST_local: http://${MINIO_ROOT_USER:-minioadmin}:${MINIO_ROOT_PASSWORD:-minioadmin}@127.0.0.1:9000
+      MINIO_BROWSER_REDIRECT_URL: http://localhost:${MINIO_CONSOLE_PORT:-9101}
     ports:
-      - "${MINIO_PORT:-9100}:9000"
-      - "${MINIO_CONSOLE_PORT:-9101}:9001"
+      - "127.0.0.1:${MINIO_PORT:-9100}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9101}:9001"
     volumes:
       - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    logging: *logging
+
+  # Catches outgoing email when SMTP_HOST is set. Inbox on MAILPIT_UI_PORT.
+  mailpit:
+    image: axllent/mailpit:v1.31
+    container_name: auto-crm-mailpit
+    restart: unless-stopped
+    environment:
+      # A reverse DNS lookup per connection made sends take seconds on macOS.
+      MP_SMTP_DISABLE_RDNS: "true"
+      MP_MAX_MESSAGES: "500"
+      MP_DATABASE: /data/mailpit.db
+    ports:
+      - "127.0.0.1:${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025"
+    volumes:
+      - mailpit_data:/data
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+    logging: *logging
 
 volumes:
   postgres_data:
   minio_data:
+  mailpit_data:

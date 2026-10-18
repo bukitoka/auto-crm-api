@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from brevo import AsyncBrevo
@@ -9,7 +9,7 @@ from fastapi import Request
 from pydantic import ValidationError
 
 from app.core.config import Settings, normalize_database_url
-from app.core.email import BrevoMailer, Mail
+from app.core.email import BrevoMailer, Mail, SmtpMailer
 from app.core.exceptions import EmailDeliveryError
 from app.core.rate_limit import RateLimiter, TooManyRequestsError
 from app.core.storage import Storage
@@ -72,6 +72,7 @@ def test_production_accepts_a_complete_configuration() -> None:
         ({"automation_api_key": ""}, "AUTOMATION_API_KEY"),
         ({"s3_secret_key": "minioadmin"}, "S3 credentials"),
         ({"brevo_api_key": ""}, "BREVO_API_KEY"),
+        ({"smtp_host": "localhost"}, "SMTP_HOST"),
         ({"mail_from_email": "no-reply@autocrm.local"}, "MAIL_FROM_EMAIL"),
         ({"cors_origins": ["http://localhost:3000"]}, "CORS_ORIGINS"),
         ({"frontend_url": "http://crm.example.com"}, "FRONTEND_URL"),
@@ -122,6 +123,35 @@ async def test_brevo_failures_become_delivery_errors() -> None:
     )
     with pytest.raises(EmailDeliveryError):
         await mailer.send(Mail(to="jane@example.com", subject="Hi", text="Hi"))
+
+
+async def test_smtp_mailer_sends_multipart_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[Any] = []
+    smtp = MagicMock()
+    smtp.return_value.__enter__.return_value.send_message.side_effect = sent.append
+    monkeypatch.setattr("app.core.email.smtplib.SMTP", smtp)
+    config = Settings(_env_file=None, smtp_host="localhost", smtp_port=1026)
+
+    await SmtpMailer(config).send(
+        Mail(to="Jane <jane@example.com>", subject="Hi", text="plain", html="<b>rich</b>")
+    )
+
+    assert smtp.call_args.args == ("localhost", 1026)
+    assert smtp.call_args.kwargs["local_hostname"] == "localhost"
+    (message,) = sent
+    assert message["To"] == "Jane <jane@example.com>"
+    assert message["Subject"] == "Hi"
+    assert message.is_multipart()
+
+
+async def test_smtp_mailer_maps_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.core.email.smtplib.SMTP", MagicMock(side_effect=ConnectionRefusedError)
+    )
+    config = Settings(_env_file=None, smtp_host="localhost")
+
+    with pytest.raises(EmailDeliveryError):
+        await SmtpMailer(config).send(Mail(to="jane@example.com", subject="Hi", text="x"))
 
 
 def request_from(host: str) -> Request:

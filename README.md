@@ -17,7 +17,7 @@ uv run fastapi dev src/app/main.py
 ```
 
 The API is at http://localhost:8000 and its interactive docs at http://localhost:8000/docs.
-Emails go out through Brevo, so set `BREVO_API_KEY` and a verified `MAIL_FROM_EMAIL` to send them.
+In development, emails go to Mailpit (inbox at http://localhost:8025) because `SMTP_HOST` is set. To test Brevo, empty `SMTP_HOST` and set `BREVO_API_KEY` and a verified `MAIL_FROM_EMAIL`.
 
 The AI features need `DEEPSEEK_API_KEY` in `.env`; without it they answer `503` and everything
 else still works. If port 5432 is taken on your machine, set `POSTGRES_PORT` (for example `5433`)

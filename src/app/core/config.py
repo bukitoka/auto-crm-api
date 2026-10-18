@@ -80,6 +80,11 @@ class Settings(BaseSettings):
     image_max_bytes: int = 5 * 1024 * 1024
     image_max_size_px: int = 512  # longest side after resizing
 
+    # Development only: when SMTP_HOST is set (Mailpit), mail goes there instead of Brevo.
+    smtp_host: str = ""
+    smtp_port: int = 1025
+    smtp_timeout_seconds: float = 10.0
+
     # Outgoing email goes through the Brevo SDK. Without a key, sending fails with a 503.
     brevo_api_key: str = ""
     brevo_timeout_seconds: float = 10.0
@@ -113,6 +118,8 @@ class Settings(BaseSettings):
             )
         if "minioadmin" in {self.s3_access_key, self.s3_secret_key}:
             problems.append("S3 credentials are still the MinIO defaults")
+        if self.smtp_host:
+            problems.append("SMTP_HOST is for development only; production sends through Brevo")
         if not self.brevo_api_key:
             problems.append("BREVO_API_KEY is required")
         if self.mail_from_email.endswith(".local"):
