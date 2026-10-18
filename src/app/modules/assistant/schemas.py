@@ -55,12 +55,6 @@ class MessageWithFiles(MessageCreate):
     attachments: list[AttachedFile] = Field(min_length=1, max_length=MAX_ATTACHMENTS)
 
 
-class Transcript(BaseModel):
-    """What was said in a voice recording. Empty when no speech was recognized."""
-
-    text: str
-
-
 class ConversationUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     is_archived: bool | None = None

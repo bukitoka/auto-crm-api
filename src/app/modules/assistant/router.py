@@ -22,24 +22,11 @@ from app.modules.assistant.schemas import (
     MessageCreate,
     MessageWithFiles,
     PageContext,
-    Transcript,
 )
-from app.modules.assistant.speech import transcribe_upload
 from app.modules.auth.dependencies import CurrentUser
 from app.shared.pagination import Page, PageParamsDep
 
 router = APIRouter(prefix="/assistant/conversations", tags=["assistant"])
-speech_router = APIRouter(prefix="/assistant", tags=["assistant"])
-
-
-@speech_router.post("/transcribe", response_model=Transcript)
-async def transcribe(
-    audio: Annotated[UploadFile, File(description="A voice recording, max 10 MB")],
-    _: CurrentUser,
-):
-    """Speech to text for the composer's voice input. Runs locally, so it works without an
-    AI key. `text` is empty when no speech was recognized."""
-    return Transcript(text=await transcribe_upload(audio))
 
 
 async def message_with_files(

@@ -12,7 +12,6 @@ from app.core.exceptions import AIResponseError
 from app.main import app
 from app.modules.ai.dependencies import get_ai_client
 from app.modules.ai.schemas import EmailDraft, ExtractedContact, LeadScore, TimelineSummary
-from app.modules.assistant import speech
 from app.modules.assistant.service import MAX_STEPS
 from tests.fakes import FakeMailer
 
@@ -733,49 +732,3 @@ async def test_attachment_validation(
     assert no_files.status_code == 422
     assert ai.requests == []
     assert (await client.get(URL, headers=admin_headers)).json()["total"] == 0
-
-
-async def test_transcribe_returns_the_text(
-    client: AsyncClient, member_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    received: list[bytes] = []
-
-    def fake_transcribe(data: bytes) -> str:
-        received.append(data)
-        return "Call Dana tomorrow"
-
-    monkeypatch.setattr(speech, "transcribe_audio", fake_transcribe)
-    response = await client.post(
-        "/api/v1/assistant/transcribe",
-        files={"audio": ("voice.webm", b"recording", "audio/webm")},
-        headers=member_headers,
-    )
-    assert response.status_code == 200, response.text
-    assert response.json() == {"text": "Call Dana tomorrow"}
-    assert received == [b"recording"]
-
-
-async def test_transcribe_rejects_bad_audio(
-    client: AsyncClient, member_headers: dict[str, str]
-) -> None:
-    url = "/api/v1/assistant/transcribe"
-    unreadable = await client.post(
-        url, files={"audio": ("voice.webm", b"noise" * 10, "audio/webm")}, headers=member_headers
-    )
-    assert unreadable.status_code == 400
-    assert "could not be read" in unreadable.text
-
-    empty = await client.post(
-        url, files={"audio": ("voice.webm", b"", "audio/webm")}, headers=member_headers
-    )
-    assert empty.status_code == 400
-
-    missing = await client.post(url, headers=member_headers)
-    assert missing.status_code == 422
-
-
-async def test_transcribe_needs_a_login(client: AsyncClient) -> None:
-    response = await client.post(
-        "/api/v1/assistant/transcribe", files={"audio": ("voice.webm", b"x", "audio/webm")}
-    )
-    assert response.status_code == 401

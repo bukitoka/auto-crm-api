@@ -23,15 +23,14 @@ FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim
 
 WORKDIR /app
 
-# Install system dependencies for audio/image processing (av, rapidocr, onnxruntime) and health check
+# System dependencies for image processing (rapidocr, onnxruntime) and the health check
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    ffmpeg \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Run as an unprivileged user. It owns /app because RapidOCR downloads its models into the
-# virtualenv on first use, and HOME holds the Whisper model cache.
+# virtualenv on first use.
 RUN useradd --system --create-home --uid 10001 app
 COPY --from=builder --chown=app:app /app /app
 COPY --chown=app:app docker-entrypoint.sh /app/docker-entrypoint.sh

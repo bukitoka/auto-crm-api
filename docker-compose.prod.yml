@@ -8,8 +8,6 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    volumes:
-      - model_cache:/home/app/.cache
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -44,7 +42,6 @@ services:
       - auto-crm-net
 
 volumes:
-  model_cache:
   caddy_data:
   caddy_config:
 

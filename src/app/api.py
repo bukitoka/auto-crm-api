@@ -3,7 +3,6 @@ from fastapi import APIRouter
 from app.modules.activities.router import router as activities_router
 from app.modules.ai.router import router as ai_router
 from app.modules.assistant.router import router as assistant_router
-from app.modules.assistant.router import speech_router as assistant_speech_router
 from app.modules.auth.router import router as auth_router
 from app.modules.companies.router import router as companies_router
 from app.modules.contacts.router import router as contacts_router
@@ -28,7 +27,6 @@ api_router.include_router(tasks_router)
 api_router.include_router(dashboard_router)
 api_router.include_router(ai_router)
 api_router.include_router(assistant_router)
-api_router.include_router(assistant_speech_router)
 api_router.include_router(emails_router)
 api_router.include_router(webhooks_router)
 api_router.include_router(integrations_router)
