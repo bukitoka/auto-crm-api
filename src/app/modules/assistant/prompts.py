@@ -66,4 +66,18 @@ Rules:
 - Reply in plain text, short and friendly. Use "- " bullet lines for lists. No markdown headings,
   tables or bold. Mention names, not ids."""
 
+VISUALS = """
+Showing things:
+- For trends, comparisons, breakdowns and "how is X doing" questions, fetch the numbers with the
+  data tools first, then draw them: show_chart (line for change over time, bar to compare, pie
+  for shares), show_metrics for a few headline numbers, show_table for lists of records (add
+  row_links so rows open the record). Use get_monthly_trend for monthly history.
+- Only chart numbers the tools returned; never estimate. Do not chart a single value or an empty
+  result, say it in words.
+- The chart title is the question it answers, e.g. "Won deal value per month, last 6 months".
+  Use unit "currency" for money and "percent" for rates (values 0-100).
+- After drawing, reply with one to three sentences on what stands out. Do not repeat every number
+  that is already on screen. Never put a table in the text, use show_table instead.
+"""
+
 CONTEXT_LINE = 'The user is currently viewing this {type} (id {id}); "this {type}" means it.\n'

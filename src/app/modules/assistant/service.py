@@ -58,7 +58,11 @@ class AssistantAgent:
         for _ in range(MAX_STEPS):
             reply = await self.ai.chat(messages=messages, tools=tool_specs_for(user))
             if not reply.tool_calls:
-                return AssistantReply(reply=(reply.content or "Done.").strip(), actions=ctx.actions)
+                return AssistantReply(
+                    reply=(reply.content or "Done.").strip(),
+                    actions=ctx.actions,
+                    blocks=ctx.blocks,
+                )
 
             # Keep the assistant turn (with its tool calls) in the history, then answer each call.
             messages.append(reply.model_dump(exclude_none=True))
@@ -74,6 +78,7 @@ class AssistantAgent:
         return AssistantReply(
             reply="That needed more steps than I can do at once. Could you split it up?",
             actions=ctx.actions,
+            blocks=ctx.blocks,
         )
 
     async def _run_tool(self, ctx: ToolContext, name: str, arguments: str) -> dict[str, Any]:
@@ -196,6 +201,7 @@ class ConversationService:
             role="assistant",
             content=result.reply,
             actions=[action.model_dump(mode="json") for action in result.actions],
+            blocks=[block.model_dump(mode="json") for block in result.blocks],
         )
         await self.repo.add(question)
         await self.repo.add(answer)
@@ -282,7 +288,7 @@ def _system_prompt(user: User, context: PageContext | None) -> str:
     today = today_utc()
     context_line = prompts.CONTEXT_LINE.format(type=context.type, id=context.id) if context else ""
     template = prompts.SUPER_ADMIN_SYSTEM if user.is_super_admin else prompts.ADMIN_SYSTEM
-    return template.format(
+    return (template + prompts.VISUALS).format(
         user_name=user.full_name,
         today=today.isoformat(),
         weekday=today.strftime("%A"),

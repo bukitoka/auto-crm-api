@@ -45,6 +45,10 @@ class ConversationMessage(UUIDPrimaryKeyMixin, Base):
     content: Mapped[str] = mapped_column(Text)
     # What the assistant changed in the CRM during this reply (AssistantAction dicts).
     actions: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    # Charts, metric cards and tables shown under the reply (AssistantBlock dicts).
+    blocks: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb")
+    )
     # Files the user attached: [{name, text}]. The text is what the model reads.
     attachments: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB, default=list, server_default=text("'[]'::jsonb")

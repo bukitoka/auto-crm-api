@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.modules.assistant.blocks import AssistantBlock
 from app.shared.schemas import ORMModel, UserRef
 
 EntityType = Literal["contact", "company", "deal", "task", "activity"]
@@ -24,6 +25,7 @@ class AssistantAction(BaseModel):
 class AssistantReply(BaseModel):
     reply: str
     actions: list[AssistantAction]
+    blocks: list[AssistantBlock] = []
 
 
 class PageContext(BaseModel):
@@ -84,6 +86,7 @@ class MessageRead(ORMModel):
     role: Literal["user", "assistant"]
     content: str
     actions: list[AssistantAction]
+    blocks: list[AssistantBlock]
     attachments: list[AttachmentRead]  # file names only; their text is kept for the model
     created_at: datetime
 

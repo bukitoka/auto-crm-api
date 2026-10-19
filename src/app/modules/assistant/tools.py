@@ -26,6 +26,7 @@ from app.modules.activities.service import ActivityService
 from app.modules.ai.client import AIClient
 from app.modules.ai.schemas import EmailDraftRequest, SummarizeRequest
 from app.modules.ai.service import AIService
+from app.modules.assistant.blocks import AssistantBlock, ChartBlock, MetricsBlock, TableBlock
 from app.modules.assistant.schemas import AssistantAction
 from app.modules.companies.models import Company
 from app.modules.companies.schemas import (
@@ -38,6 +39,7 @@ from app.modules.companies.service import CompanyService
 from app.modules.contacts.models import Contact, ContactStatus
 from app.modules.contacts.schemas import ContactCreate, ContactFilters, ContactRead, ContactUpdate
 from app.modules.contacts.service import ContactService
+from app.modules.dashboard.repository import TrendMetric
 from app.modules.dashboard.service import DashboardService
 from app.modules.deals.models import Deal
 from app.modules.deals.schemas import DealCreate, DealFilters, DealRead, DealUpdate
@@ -66,6 +68,7 @@ class ToolContext:
     ai: AIClient
     mailer: BaseMailer
     actions: list[AssistantAction] = field(default_factory=list)
+    blocks: list[AssistantBlock] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.contacts = ContactService(self.session)
@@ -95,6 +98,10 @@ READ_TOOLS = frozenset(
         "get_dashboard_summary",
         "list_activities",
         "summarize_timeline",
+        "get_monthly_trend",
+        "show_chart",
+        "show_metrics",
+        "show_table",
     }
 )
 SUPERVISOR_TOOLS = frozenset({"list_automations", "create_admin", "set_admin_active"})
@@ -607,6 +614,39 @@ async def set_admin_active(ctx: ToolContext, params: SetAdminActiveParams) -> di
     return {"admin": {"id": str(admin.id), "name": admin.full_name, "active": admin.is_active}}
 
 
+class MonthlyTrendParams(BaseModel):
+    metric: TrendMetric = Field(
+        description="won_value (money from won deals), deals_won, new_contacts or new_deals"
+    )
+    months: int = Field(default=6, ge=2, le=12, description="How many calendar months, ending now")
+
+
+async def get_monthly_trend(ctx: ToolContext, params: MonthlyTrendParams) -> dict[str, Any]:
+    series = await ctx.dashboard.monthly_trend(params.metric, params.months)
+    return {
+        "metric": params.metric,
+        "months": [{"month": month, "value": value} for month, value in series],
+    }
+
+
+_SHOWN = {"shown": True, "note": "It is displayed to the user under your reply."}
+
+
+async def show_chart(ctx: ToolContext, params: ChartBlock) -> dict[str, Any]:
+    ctx.blocks.append(params)
+    return _SHOWN
+
+
+async def show_metrics(ctx: ToolContext, params: MetricsBlock) -> dict[str, Any]:
+    ctx.blocks.append(params)
+    return _SHOWN
+
+
+async def show_table(ctx: ToolContext, params: TableBlock) -> dict[str, Any]:
+    ctx.blocks.append(params)
+    return _SHOWN
+
+
 async def get_dashboard_summary(ctx: ToolContext, _: NoParams) -> dict[str, Any]:
     summary = await ctx.dashboard.summary(ctx.user)
     overdue = await ctx.tasks.list_page(TaskFilters(overdue=True), _page())
@@ -834,6 +874,34 @@ _TOOL_LIST = [
         "tasks, recent activities.",
         NoParams,
         get_dashboard_summary,
+    ),
+    Tool(
+        "get_monthly_trend",
+        "Totals per calendar month for the last 2-12 months: money from won deals, deals won, "
+        "new contacts or new deals. Use it for trend questions, then draw it with show_chart.",
+        MonthlyTrendParams,
+        get_monthly_trend,
+    ),
+    Tool(
+        "show_chart",
+        "Draw a bar, line or pie chart under your reply from numbers you already fetched with "
+        "the other tools. The title must be the question it answers. Use line for change over "
+        "time, bar to compare, pie for shares of a whole. Never chart numbers you made up.",
+        ChartBlock,
+        show_chart,
+    ),
+    Tool(
+        "show_metrics",
+        "Show up to 6 headline numbers as cards under your reply. Values are pre-formatted text.",
+        MetricsBlock,
+        show_metrics,
+    ),
+    Tool(
+        "show_table",
+        "Show a table (up to 25 rows, 6 columns) under your reply. Add row_links so a row opens "
+        "its contact, company or deal.",
+        TableBlock,
+        show_table,
     ),
     Tool(
         "list_activities",

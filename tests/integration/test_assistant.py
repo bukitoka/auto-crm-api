@@ -732,3 +732,142 @@ async def test_attachment_validation(
     assert no_files.status_code == 422
     assert ai.requests == []
     assert (await client.get(URL, headers=admin_headers)).json()["total"] == 0
+
+
+async def test_assistant_draws_charts_metrics_and_tables(
+    client: AsyncClient, admin_headers: dict[str, str], ai: ScriptedAI
+) -> None:
+    contact = (
+        await client.post("/api/v1/contacts", json={"first_name": "Sam"}, headers=admin_headers)
+    ).json()
+    ai.script = [
+        calls(
+            ("get_monthly_trend", {"metric": "new_contacts", "months": 3}),
+            ("show_metrics", {"items": [{"label": "New contacts", "value": "1"}]}),
+        ),
+        calls(
+            (
+                "show_chart",
+                {
+                    "kind": "bar",
+                    "title": "New contacts per month, last 3 months",
+                    "categories": ["Aug", "Sep", "Oct"],
+                    "series": [{"name": "Contacts", "values": [0, 0, 1]}],
+                },
+            ),
+            (
+                "show_table",
+                {
+                    "title": "Newest contacts",
+                    "columns": ["Name", "Status"],
+                    "rows": [["Sam", "lead"]],
+                    "row_links": [{"entity": "contact", "id": contact["id"]}],
+                },
+            ),
+        ),
+        says("One new contact this month."),
+    ]
+
+    turn = await start(client, admin_headers, "How many contacts did I add lately?")
+
+    trend = ai.tool_results(1)[0]
+    assert trend["metric"] == "new_contacts"
+    assert len(trend["months"]) == 3
+    assert trend["months"][-1]["value"] == 1
+    assert [m["value"] for m in trend["months"][:-1]] == [0, 0]
+
+    reply = turn["messages"][1]
+    assert [block["type"] for block in reply["blocks"]] == ["metrics", "chart", "table"]
+    assert reply["blocks"][1]["series"][0]["values"] == [0, 0, 1]
+    assert reply["blocks"][2]["row_links"][0]["id"] == contact["id"]
+
+    detail = (await client.get(f"{URL}/{turn['conversation']['id']}", headers=admin_headers)).json()
+    assert [b["type"] for b in detail["messages"][1]["blocks"]] == ["metrics", "chart", "table"]
+    assert detail["messages"][0]["blocks"] == []
+
+
+async def test_bad_blocks_go_back_to_the_model(
+    client: AsyncClient, admin_headers: dict[str, str], ai: ScriptedAI
+) -> None:
+    ai.script = [
+        calls(
+            (
+                "show_chart",
+                {
+                    "kind": "bar",
+                    "title": "Mismatch",
+                    "categories": ["A", "B"],
+                    "series": [{"name": "S", "values": [1]}],
+                },
+            ),
+            (
+                "show_chart",
+                {
+                    "kind": "pie",
+                    "title": "Negative",
+                    "categories": ["A", "B"],
+                    "series": [{"name": "S", "values": [1, -1]}],
+                },
+            ),
+            ("show_table", {"title": "Ragged", "columns": ["A", "B"], "rows": [["only one"]]}),
+        ),
+        says("Could not draw that."),
+    ]
+
+    turn = await start(client, admin_headers, "Chart it")
+
+    errors = ai.tool_results()
+    assert all("Invalid arguments" in result["error"] for result in errors)
+    assert turn["messages"][1]["blocks"] == []
+
+
+async def test_super_admin_charts_across_admins(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    member_headers: dict[str, str],
+    super_admin_headers: dict[str, str],
+    ai: ScriptedAI,
+) -> None:
+    await client.post("/api/v1/contacts", json={"first_name": "A"}, headers=admin_headers)
+    await client.post("/api/v1/contacts", json={"first_name": "B"}, headers=member_headers)
+    ai.script = [
+        calls(("get_monthly_trend", {"metric": "new_contacts", "months": 2})),
+        says("Two."),
+    ]
+
+    await client.post(URL, json=message("Contacts per month"), headers=super_admin_headers)
+    assert ai.tool_results()[0]["months"][-1]["value"] == 2
+
+    ai.script = [calls(("get_monthly_trend", {"metric": "new_contacts"})), says("One.")]
+    await client.post(URL, json=message("Contacts per month"), headers=admin_headers)
+    assert ai.tool_results()[0]["months"][-1]["value"] == 1
+
+
+async def test_monthly_trend_metrics(
+    client: AsyncClient, admin_headers: dict[str, str], ai: ScriptedAI
+) -> None:
+    stages = (await client.get("/api/v1/pipeline/stages", headers=admin_headers)).json()
+    won = next(s for s in stages if s["is_won"])
+    deal = (
+        await client.post(
+            "/api/v1/deals", json={"title": "Big one", "value": 5000}, headers=admin_headers
+        )
+    ).json()
+    await client.patch(
+        f"/api/v1/deals/{deal['id']}", json={"stage_id": won["id"]}, headers=admin_headers
+    )
+    ai.script = [
+        calls(
+            ("get_monthly_trend", {"metric": "won_value", "months": 2}),
+            ("get_monthly_trend", {"metric": "deals_won", "months": 2}),
+            ("get_monthly_trend", {"metric": "new_deals", "months": 2}),
+        ),
+        says("Done."),
+    ]
+
+    await start(client, admin_headers, "Trends")
+
+    value, count, created = ai.tool_results()
+    assert value["months"][-1]["value"] == 5000
+    assert count["months"][-1]["value"] == 1
+    assert created["months"][-1]["value"] == 1

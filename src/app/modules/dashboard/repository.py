@@ -1,6 +1,7 @@
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
 from sqlalchemy import Row, and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +17,8 @@ from app.modules.users.service import SERVICE_ACCOUNT_EMAIL
 
 _IS_OPEN_STAGE = and_(PipelineStage.is_won.is_(False), PipelineStage.is_lost.is_(False))
 _IS_OPEN_TASK = Task.status != TaskStatus.DONE
+
+TrendMetric = Literal["won_value", "deals_won", "new_contacts", "new_deals"]
 
 
 class DashboardRepository:
@@ -150,6 +153,29 @@ class DashboardRepository:
             people = people.where(User.id == only_id)
         result = await self.session.execute(people)
         return list(result.all())
+
+    async def monthly_totals(self, metric: TrendMetric, since: datetime) -> dict[str, float]:
+        """Totals per calendar month ("2026-10") from `since` on; months without data are absent."""
+        if metric == "new_contacts":
+            when, query = Contact.created_at, select(func.count()).select_from(Contact)
+        elif metric == "new_deals":
+            when, query = Deal.created_at, select(func.count()).select_from(Deal)
+        else:
+            when = Deal.closed_at
+            total = (
+                func.coalesce(func.sum(Deal.value), 0) if metric == "won_value" else func.count()
+            )
+            query = (
+                select(total)
+                .select_from(Deal)
+                .join(Deal.stage)
+                .where(PipelineStage.is_won.is_(True))
+            )
+        month = func.to_char(func.date_trunc("month", when), "YYYY-MM")
+        result = await self.session.execute(
+            query.add_columns(month.label("month")).where(when >= since).group_by(month)
+        )
+        return {row.month: float(row[0]) for row in result.all()}
 
     async def pipeline_by_stage(self) -> list[Row]:
         """One row per stage: (stage_id, stage_name, deal_count, total_value)."""

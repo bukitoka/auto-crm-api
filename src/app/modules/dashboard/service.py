@@ -6,7 +6,7 @@ from app.modules.activities.models import ActivityType
 from app.modules.activities.repository import ActivityRepository
 from app.modules.activities.schemas import ActivityRead
 from app.modules.contacts.models import ContactStatus
-from app.modules.dashboard.repository import DashboardRepository
+from app.modules.dashboard.repository import DashboardRepository, TrendMetric
 from app.modules.dashboard.schemas import (
     ActivityTypeCount,
     DashboardSummary,
@@ -32,6 +32,19 @@ class DashboardService:
         self.repo = DashboardRepository(session)
         self.activities = ActivityRepository(session)
         self.tasks = TaskRepository(session)
+
+    async def monthly_trend(self, metric: TrendMetric, months: int) -> list[tuple[str, float]]:
+        """The last `months` calendar months, oldest first, zero where nothing happened."""
+        first = start_of_month_utc()
+        starts = []
+        year, month = first.year, first.month
+        for _ in range(months):
+            starts.append((year, month))
+            year, month = (year, month - 1) if month > 1 else (year - 1, 12)
+        starts.reverse()
+        since = first.replace(year=starts[0][0], month=starts[0][1])
+        totals = await self.repo.monthly_totals(metric, since)
+        return [(f"{y}-{m:02d}", totals.get(f"{y}-{m:02d}", 0.0)) for y, m in starts]
 
     async def summary(self, user: User) -> DashboardSummary:
         month_start = start_of_month_utc()
