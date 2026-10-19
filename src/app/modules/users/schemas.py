@@ -26,7 +26,9 @@ class AdminCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    """What the super admin can change on an admin account."""
+    """What the super admin can change on an admin account. `password` sets a new password."""
 
     full_name: str | None = Field(default=None, min_length=1, max_length=200)
+    email: EmailStr | None = None
+    password: str | None = Field(default=None, min_length=8, max_length=128)
     is_active: bool | None = None

@@ -2,6 +2,8 @@ from typing import Any
 
 from httpx import AsyncClient
 
+from tests.integration.conftest import PASSWORD
+
 API = "/api/v1"
 
 
@@ -94,6 +96,48 @@ async def test_only_the_super_admin_manages_admin_accounts(
         f"{API}/auth/login", json={"email": body["email"], "password": body["password"]}
     )
     assert login.status_code in (400, 401, 403)
+
+
+async def test_super_admin_edits_an_admin_account(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    member_headers: dict[str, str],
+    super_admin_headers: dict[str, str],
+) -> None:
+    users = await client.get(f"{API}/users", headers=super_admin_headers)
+    ada = next(u for u in users.json()["items"] if u["email"] == "admin@example.com")
+    url = f"{API}/users/{ada['id']}"
+
+    edited = await client.patch(
+        url,
+        json={
+            "full_name": "Ada Lovelace",
+            "email": "Ada.L@Example.com",
+            "password": "n3w-password!",
+        },
+        headers=super_admin_headers,
+    )
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["full_name"] == "Ada Lovelace"
+    assert edited.json()["email"] == "ada.l@example.com"
+    assert "password" not in edited.json()
+
+    old = await client.post(
+        f"{API}/auth/login", json={"email": "admin@example.com", "password": PASSWORD}
+    )
+    assert old.status_code in (400, 401)
+    new = await client.post(
+        f"{API}/auth/login", json={"email": "ada.l@example.com", "password": "n3w-password!"}
+    )
+    assert new.status_code == 200
+
+    taken = await client.patch(url, json={"email": "max@example.com"}, headers=super_admin_headers)
+    assert taken.status_code == 409
+    short = await client.patch(url, json={"password": "short"}, headers=super_admin_headers)
+    assert short.status_code == 422
+    assert (
+        await client.patch(url, json={"full_name": "Hacked"}, headers=member_headers)
+    ).status_code == 403
 
 
 async def test_dashboard_is_scoped_to_the_viewer(

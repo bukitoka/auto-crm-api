@@ -42,5 +42,5 @@ async def delete_my_avatar(service: UserServiceDep, user: CurrentUser):
 async def update_user(
     user_id: uuid.UUID, data: UserUpdate, service: UserServiceDep, _: SuperAdminUser
 ):
-    """Rename an admin or switch the account on or off. Only the super admin can."""
+    """Edit an admin: name, email, password or on/off. Only the super admin can."""
     return await service.update(user_id, data)

@@ -85,6 +85,13 @@ class UserService:
         if user.is_super_admin or user.email == SERVICE_ACCOUNT_EMAIL:
             raise NotFoundError("User not found")
         changes = data.model_dump(exclude_unset=True, exclude_none=True)
+        if "email" in changes:
+            changes["email"] = changes["email"].lower()
+            taken = await self.repo.get_by_email(changes["email"])
+            if taken is not None and taken.id != user.id:
+                raise ConflictError("A user with this email already exists")
+        if "password" in changes:
+            changes["hashed_password"] = hash_password(changes.pop("password"))
         for field, value in changes.items():
             setattr(user, field, value)
         await self.session.commit()
