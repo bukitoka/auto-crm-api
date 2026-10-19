@@ -10,7 +10,7 @@ USERS = "/api/v1/users"
 async def test_health(client: AsyncClient) -> None:
     response = await client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json() == {"status": "ok", "version": settings.app_version, "commit": ""}
 
 
 @pytest.mark.not_set_up

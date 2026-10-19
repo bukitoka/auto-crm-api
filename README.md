@@ -79,4 +79,4 @@ n8n, which then acts as the `automation@auto-crm.local` service account. That ac
 Deployed by `.github/workflows/deploy.yml` to a Docker host behind Caddy (automatic HTTPS), with Neon
 Postgres, Neon object storage and Brevo email (SDK). Copy `.env.production.example`
 to `~/apps/auto-crm-api/.env` on the server. With `ENVIRONMENT=production` the API refuses to start on
-weak secrets, and disables `/docs`. The `/api/v1/emails/notify` endpoint lets n8n send mail through the same backend.
+weak secrets, and disables `/docs`. Each deploy is versioned `YYYY.MM.DD.N` (date and run number); `/health` reports it. The `/api/v1/emails/notify` endpoint lets n8n send mail through the same backend.

@@ -31,6 +31,9 @@ class Settings(BaseSettings):
 
     app_name: str = "Auto CRM API"
     api_prefix: str = "/api/v1"
+    # Set at image build time by the deploy workflow ("2026.10.19.42"); "dev" when run locally.
+    app_version: str = "dev"
+    git_sha: str = ""
     environment: Literal["development", "production"] = "development"
 
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/auto_crm"
