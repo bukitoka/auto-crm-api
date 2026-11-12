@@ -189,32 +189,32 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "alembic", specifier = ">=1.20.0" },
+    { name = "alembic", specifier = ">=1.20.1" },
     { name = "asyncpg", specifier = ">=0.32.0" },
     { name = "brevo-python", specifier = ">=5.1.0" },
-    { name = "fastapi", extras = ["standard"], specifier = ">=0.143.0" },
+    { name = "fastapi", extras = ["standard"], specifier = ">=0.162.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "minio", specifier = ">=7.2.20" },
     { name = "onnxruntime", specifier = ">=1.31.0" },
-    { name = "openai", specifier = ">=3.29.0" },
-    { name = "pillow", specifier = ">=12.3.0" },
+    { name = "openai", specifier = ">=3.38.0" },
+    { name = "pillow", specifier = ">=13.0.0" },
     { name = "pwdlib", extras = ["argon2"], specifier = ">=0.3.1" },
-    { name = "pydantic-settings", specifier = ">=2.15.0" },
+    { name = "pydantic-settings", specifier = ">=2.16.1" },
     { name = "pyjwt", specifier = ">=2.15.1" },
-    { name = "pypdf", specifier = ">=6.20.1" },
+    { name = "pypdf", specifier = ">=6.21.2" },
     { name = "python-docx", specifier = ">=1.2.0" },
     { name = "rapidocr", specifier = ">=3.10.0" },
-    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.1.4" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.1.6" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "faker", specifier = ">=40.43.0" },
     { name = "pytest", specifier = ">=9.1.1" },
-    { name = "pytest-asyncio", specifier = ">=1.4.0" },
+    { name = "pytest-asyncio", specifier = ">=1.4.1" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
-    { name = "ruff", specifier = ">=0.17.0" },
-    { name = "ty", specifier = ">=0.0.86" },
+    { name = "ruff", specifier = ">=0.17.2" },
+    { name = "ty", specifier = ">=0.0.92" },
 ]
 
 [[package]]
