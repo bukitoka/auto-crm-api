@@ -209,12 +209,12 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "faker", specifier = ">=40.43.0" },
-    { name = "pytest", specifier = ">=9.1.1" },
-    { name = "pytest-asyncio", specifier = ">=1.4.1" },
+    { name = "faker", specifier = ">=40.54.0" },
+    { name = "pytest", specifier = ">=9.2.0" },
+    { name = "pytest-asyncio", specifier = ">=1.4.1.post1" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
-    { name = "ruff", specifier = ">=0.17.2" },
-    { name = "ty", specifier = ">=0.0.92" },
+    { name = "ruff", specifier = ">=0.17.4" },
+    { name = "ty", specifier = ">=0.0.101" },
 ]
 
 [[package]]

@@ -1,15 +1,18 @@
-import json
-import logging
+"""Manage saved conversations, ownership, and message persistence.
+
+The agent runs CRM tools before the message pair is stored. Keep commits here
+explicit: tool recovery can roll back the shared session during a reply.
+"""
+
 import uuid
 from typing import Any
 
-from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.email import BaseMailer
 from app.core.exceptions import AppError, NotFoundError, PermissionDeniedError
 from app.modules.ai.client import AIClient
-from app.modules.assistant import prompts
+from app.modules.assistant.agent import AssistantAgent
 from app.modules.assistant.models import Conversation, ConversationMessage
 from app.modules.assistant.repository import ConversationRepository
 from app.modules.assistant.schemas import (
@@ -23,82 +26,19 @@ from app.modules.assistant.schemas import (
     MessageCreate,
     MessageRead,
     MessageWithFiles,
-    PageContext,
 )
-from app.modules.assistant.tools import TOOLS, ToolContext, tool_specs_for
 from app.modules.users.models import User
 from app.shared.pagination import Page, PageParams
-from app.shared.utils import today_utc, utc_now
+from app.shared.utils import utc_now
 
-logger = logging.getLogger(__name__)
-
-# Model round-trips per user message (each may call several tools). Keeps runaway loops cheap.
-MAX_STEPS = 8
 # How much of the conversation the model sees.
 HISTORY_LIMIT = 20
 TITLE_LENGTH = 60
 
 
-class AssistantAgent:
-    def __init__(self, session: AsyncSession, ai: AIClient, mailer: BaseMailer) -> None:
-        self.session = session
-        self.ai = ai
-        self.mailer = mailer
-
-    async def reply(
-        self, history: list[dict[str, Any]], *, user: User, context: PageContext | None
-    ) -> AssistantReply:
-        """Answer the last user message in `history` ([{role, content}, ...])."""
-        ctx = ToolContext(self.session, user, self.ai, self.mailer)
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": _system_prompt(user, context)},
-            *history,
-        ]
-
-        for _ in range(MAX_STEPS):
-            reply = await self.ai.chat(messages=messages, tools=tool_specs_for(user))
-            if not reply.tool_calls:
-                return AssistantReply(
-                    reply=(reply.content or "Done.").strip(),
-                    actions=ctx.actions,
-                    blocks=ctx.blocks,
-                )
-
-            # Keep the assistant turn (with its tool calls) in the history, then answer each call.
-            messages.append(reply.model_dump(exclude_none=True))
-            for call in reply.tool_calls:
-                function = getattr(call, "function", None)
-                name = function.name if function else ""
-                arguments = function.arguments if function else "{}"
-                result = await self._run_tool(ctx, name, arguments)
-                messages.append(
-                    {"role": "tool", "tool_call_id": call.id, "content": _to_json(result)}
-                )
-
-        return AssistantReply(
-            reply="That needed more steps than I can do at once. Could you split it up?",
-            actions=ctx.actions,
-            blocks=ctx.blocks,
-        )
-
-    async def _run_tool(self, ctx: ToolContext, name: str, arguments: str) -> dict[str, Any]:
-        """Run one tool call. Problems go back to the model as {"error": ...} so it can recover."""
-        tool = TOOLS.get(name)
-        if tool is None or not tool.allowed_for(ctx.user):
-            return {"error": f"Unknown tool {name!r}"}
-        try:
-            params = tool.params.model_validate_json(arguments or "{}")
-            return await tool.handler(ctx, params)
-        except ValidationError as exc:
-            return {"error": f"Invalid arguments: {exc.errors(include_url=False)}"}
-        except AppError as exc:
-            # Undo anything half-done, then reload the user (a rollback expires loaded objects).
-            await self.session.rollback()
-            await self.session.refresh(ctx.user)
-            return {"error": exc.message}
-
-
 class ConversationService:
+    """Keep chats private and store a question and answer only after the agent replies."""
+
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self.repo = ConversationRepository(session)
@@ -176,10 +116,12 @@ class ConversationService:
         ai: AIClient,
         mailer: BaseMailer,
     ) -> ChatTurn:
+        """Build model history, run tools, then save the completed exchange."""
         previous = await self.repo.recent_messages(conversation_id, HISTORY_LIMIT - 1)
         attachments = _attachments(data)
         history = [
-            {"role": m.role, "content": _model_content(m.content, m.attachments)} for m in previous
+            {"role": message.role, "content": _model_content(message.content, message.attachments)}
+            for message in previous
         ]
         history.append({"role": "user", "content": _model_content(data.content, attachments)})
 
@@ -187,12 +129,24 @@ class ConversationService:
         result = await AssistantAgent(self.session, ai, mailer).reply(
             history, user=user, context=data.context
         )
+        return await self._save_reply(conversation_id, data.content, attachments, result, user=user)
 
+    async def _save_reply(
+        self,
+        conversation_id: uuid.UUID,
+        content: str,
+        attachments: list[dict[str, Any]],
+        result: AssistantReply,
+        *,
+        user: User,
+    ) -> ChatTurn:
+        """Store both messages together, update the count, and reopen an archived chat."""
+        # Reload after tool execution: a failed tool may have rolled back the session.
         conversation = await self.get(conversation_id, user=user)
         question = ConversationMessage(
             conversation_id=conversation.id,
             role="user",
-            content=data.content,
+            content=content,
             actions=[],
             attachments=attachments,
         )
@@ -282,19 +236,3 @@ def _model_content(content: str, attachments: list[dict[str, Any]]) -> str:
         for file in attachments
     ]
     return "\n\n".join(part for part in [content, *files] if part)
-
-
-def _system_prompt(user: User, context: PageContext | None) -> str:
-    today = today_utc()
-    context_line = prompts.CONTEXT_LINE.format(type=context.type, id=context.id) if context else ""
-    template = prompts.SUPER_ADMIN_SYSTEM if user.is_super_admin else prompts.ADMIN_SYSTEM
-    return (template + prompts.VISUALS).format(
-        user_name=user.full_name,
-        today=today.isoformat(),
-        weekday=today.strftime("%A"),
-        context=context_line,
-    )
-
-
-def _to_json(data: dict[str, Any]) -> str:
-    return json.dumps(data, default=str, ensure_ascii=False)

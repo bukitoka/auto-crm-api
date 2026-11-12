@@ -12,7 +12,7 @@ from app.core.exceptions import AIResponseError
 from app.main import app
 from app.modules.ai.dependencies import get_ai_client
 from app.modules.ai.schemas import EmailDraft, ExtractedContact, LeadScore, TimelineSummary
-from app.modules.assistant.service import MAX_STEPS
+from app.modules.assistant.agent import MAX_STEPS
 from tests.fakes import FakeMailer
 
 URL = "/api/v1/assistant/conversations"

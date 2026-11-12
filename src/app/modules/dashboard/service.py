@@ -35,16 +35,24 @@ class DashboardService:
 
     async def monthly_trend(self, metric: TrendMetric, months: int) -> list[tuple[str, float]]:
         """The last `months` calendar months, oldest first, zero where nothing happened."""
-        first = start_of_month_utc()
-        starts = []
-        year, month = first.year, first.month
+        current_month = start_of_month_utc()
+        month_starts = []
+        year, month = current_month.year, current_month.month
         for _ in range(months):
-            starts.append((year, month))
-            year, month = (year, month - 1) if month > 1 else (year - 1, 12)
-        starts.reverse()
-        since = first.replace(year=starts[0][0], month=starts[0][1])
+            month_starts.append(current_month.replace(year=year, month=month))
+            if month == 1:
+                year -= 1
+                month = 12
+            else:
+                month -= 1
+        month_starts.reverse()
+        since = month_starts[0]
         totals = await self.repo.monthly_totals(metric, since)
-        return [(f"{y}-{m:02d}", totals.get(f"{y}-{m:02d}", 0.0)) for y, m in starts]
+        series = []
+        for month_start in month_starts:
+            month_key = f"{month_start.year}-{month_start.month:02d}"
+            series.append((month_key, totals.get(month_key, 0.0)))
+        return series
 
     async def summary(self, user: User) -> DashboardSummary:
         month_start = start_of_month_utc()

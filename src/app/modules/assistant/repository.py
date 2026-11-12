@@ -13,7 +13,9 @@ class ConversationRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def get(self, conversation_id: uuid.UUID, *, with_messages: bool = False):
+    async def get(
+        self, conversation_id: uuid.UUID, *, with_messages: bool = False
+    ) -> Conversation | None:
         query = (
             select(Conversation)
             .where(Conversation.id == conversation_id)
