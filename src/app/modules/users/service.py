@@ -3,12 +3,18 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import ConflictError, NotFoundError
-from app.core.security import hash_password
+from app.core.exceptions import BadRequestError, ConflictError, NotFoundError, PermissionDeniedError
+from app.core.security import hash_password, verify_password
 from app.core.storage import Storage, get_storage
 from app.modules.users.models import SERVICE_ACCOUNT_EMAIL, SERVICE_ACCOUNT_NAME, User, UserRole
 from app.modules.users.repository import UserRepository
-from app.modules.users.schemas import AdminCreate, UserRead, UserUpdate
+from app.modules.users.schemas import (
+    AdminCreate,
+    PasswordChange,
+    ProfileUpdate,
+    UserRead,
+    UserUpdate,
+)
 from app.shared.images import replace_image
 from app.shared.pagination import Page, PageParams
 
@@ -98,21 +104,48 @@ class UserService:
         await self.session.refresh(user)
         return user
 
-    async def set_avatar(self, user: User, image: bytes) -> User:
-        """Store a new avatar (already converted by `read_image`) for `user`."""
-        user.avatar_key = await replace_image(
-            self.storage, folder=f"users/{user.id}", image=image, old_key=user.avatar_key
-        )
+    @staticmethod
+    def _require_personal_account(user: User) -> None:
+        if user.email == SERVICE_ACCOUNT_EMAIL:
+            raise PermissionDeniedError("This action requires a personal account")
+
+    async def update_profile(self, user: User, data: ProfileUpdate) -> User:
+        self._require_personal_account(user)
+        user.full_name = data.full_name
         await self.session.commit()
         await self.session.refresh(user)
         return user
 
+    async def change_password(self, user: User, data: PasswordChange) -> None:
+        self._require_personal_account(user)
+        await self.session.refresh(user, with_for_update=True)
+        if not verify_password(data.current_password, user.hashed_password):
+            raise BadRequestError("Current password is incorrect")
+        user.hashed_password = hash_password(data.password)
+        await self.session.commit()
+
+    async def set_avatar(self, user: User, image: bytes) -> User:
+        """Store a new avatar (already converted by `read_image`) for `user`."""
+        self._require_personal_account(user)
+        await self.session.refresh(user, with_for_update=True)
+        old_key = user.avatar_key
+        user.avatar_key = await replace_image(
+            self.storage, folder=f"users/{user.id}", image=image, old_key=None
+        )
+        await self.session.commit()
+        if old_key:
+            await self.storage.delete(old_key)
+        await self.session.refresh(user)
+        return user
+
     async def remove_avatar(self, user: User) -> User:
+        self._require_personal_account(user)
+        await self.session.refresh(user, with_for_update=True)
         if user.avatar_key:
             old_key, user.avatar_key = user.avatar_key, None
             await self.session.commit()
-            await self.session.refresh(user)
             await self.storage.delete(old_key)
+            await self.session.refresh(user)
         return user
 
     async def get_or_create_service_account(self) -> User:

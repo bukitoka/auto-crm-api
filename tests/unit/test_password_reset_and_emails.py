@@ -252,6 +252,11 @@ async def test_user_avatar_set_and_remove(session: AsyncMock, storage: FakeStora
     await service.set_avatar(user, b"me")
     assert user.avatar_key is not None and user.avatar_key.startswith(f"users/{user.id}/")
 
+    first_key = user.avatar_key
+    await service.set_avatar(user, b"replacement")
+    assert user.avatar_key != first_key
+    assert first_key not in storage.files
+
     await service.remove_avatar(user)
     assert user.avatar_key is None and storage.files == {}
     await service.remove_avatar(user)  # no-op

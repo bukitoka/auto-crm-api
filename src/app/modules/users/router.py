@@ -4,7 +4,13 @@ from fastapi import APIRouter, UploadFile, status
 
 from app.modules.auth.dependencies import CurrentUser, SuperAdminUser
 from app.modules.users.dependencies import UserServiceDep
-from app.modules.users.schemas import AdminCreate, UserRead, UserUpdate
+from app.modules.users.schemas import (
+    AdminCreate,
+    PasswordChange,
+    ProfileUpdate,
+    UserRead,
+    UserUpdate,
+)
 from app.shared.images import read_image
 from app.shared.pagination import Page, PageParamsDep
 
@@ -25,6 +31,16 @@ async def list_users(
 async def create_admin(data: AdminCreate, service: UserServiceDep, _: SuperAdminUser):
     """Create an admin account. Only the super admin can."""
     return await service.create_admin(data)
+
+
+@router.patch("/me", response_model=UserRead)
+async def update_my_profile(data: ProfileUpdate, service: UserServiceDep, user: CurrentUser):
+    return await service.update_profile(user, data)
+
+
+@router.put("/me/password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_my_password(data: PasswordChange, service: UserServiceDep, user: CurrentUser):
+    await service.change_password(user, data)
 
 
 @router.put("/me/avatar", response_model=UserRead)

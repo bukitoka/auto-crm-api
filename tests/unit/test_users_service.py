@@ -2,10 +2,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.core.exceptions import ConflictError, NotFoundError
-from app.core.security import verify_password
+from app.core.exceptions import BadRequestError, ConflictError, NotFoundError, PermissionDeniedError
+from app.core.security import hash_password, verify_password
 from app.modules.users.models import SERVICE_ACCOUNT_EMAIL, UserRole
-from app.modules.users.schemas import AdminCreate, UserUpdate
+from app.modules.users.schemas import AdminCreate, PasswordChange, ProfileUpdate, UserUpdate
 from app.modules.users.service import UserService
 from app.shared.pagination import PageParams
 from tests.unit.conftest import make_user, mock_repos
@@ -146,3 +146,37 @@ async def test_existing_service_account_is_reused(service: UserService) -> None:
 
     assert await service.get_or_create_service_account() is existing
     service.repo.add.assert_not_awaited()
+
+
+@pytest.mark.parametrize("is_super_admin", [False, True])
+async def test_update_own_profile(service: UserService, is_super_admin: bool) -> None:
+    user = make_user(is_super_admin=is_super_admin)
+
+    assert await service.update_profile(user, ProfileUpdate(full_name="  New Name  ")) is user
+
+    assert user.full_name == "New Name"
+    service.session.commit.assert_awaited_once()
+
+
+async def test_change_password_requires_current_password(service: UserService) -> None:
+    user = make_user(hashed_password=hash_password("old-password"))
+
+    with pytest.raises(BadRequestError, match="Current password is incorrect"):
+        await service.change_password(
+            user, PasswordChange(current_password="wrong", password="new-password")
+        )
+    service.session.commit.assert_not_awaited()
+
+    await service.change_password(
+        user, PasswordChange(current_password="old-password", password="new-password")
+    )
+    assert verify_password("new-password", user.hashed_password)
+    service.session.commit.assert_awaited_once()
+
+
+async def test_service_account_cannot_change_its_profile(service: UserService) -> None:
+    user = make_user(email=SERVICE_ACCOUNT_EMAIL)
+
+    with pytest.raises(PermissionDeniedError):
+        await service.update_profile(user, ProfileUpdate(full_name="New Name"))
+    service.session.commit.assert_not_awaited()
