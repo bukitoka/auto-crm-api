@@ -5,10 +5,13 @@ import uuid
 from typing import Any
 
 from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy import select
 
 from app.modules.assistant.tools.definitions import NoParams, ToolContext
 from app.modules.assistant.tools.results import _page
+from app.modules.integrations.models import LeadRouting
 from app.modules.users.schemas import AdminCreate, UserUpdate
+from app.modules.webhooks.models import WebhookDelivery
 
 
 async def list_users(ctx: ToolContext, _: NoParams) -> dict[str, Any]:
@@ -60,4 +63,27 @@ async def list_automations(ctx: ToolContext, _: NoParams) -> dict[str, Any]:
             {"event": w.event, "target_url": w.target_url, "active": w.is_active}
             for w in page.items
         ]
+    }
+
+
+async def get_automation_health(ctx: ToolContext, _: NoParams) -> dict[str, Any]:
+    routing = await ctx.session.get(LeadRouting, 1)
+    deliveries = await ctx.session.scalars(
+        select(WebhookDelivery).order_by(WebhookDelivery.created_at.desc()).limit(20)
+    )
+    return {
+        "lead_routing": {
+            "enabled": routing.enabled if routing else False,
+            "response_hours": routing.response_hours if routing else 24,
+        },
+        "deliveries": [
+            {
+                "event": entry.event,
+                "delivered": entry.delivered,
+                "attempts": entry.attempts,
+                "error": entry.error,
+                "updated_at": entry.updated_at.isoformat(),
+            }
+            for entry in deliveries
+        ],
     }

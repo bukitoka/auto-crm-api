@@ -14,7 +14,7 @@ class ConversationRepository:
         self.session = session
 
     async def get(
-        self, conversation_id: uuid.UUID, *, with_messages: bool = False
+        self, conversation_id: uuid.UUID, *, with_messages: bool = False, lock: bool = False
     ) -> Conversation | None:
         query = (
             select(Conversation)
@@ -22,6 +22,8 @@ class ConversationRepository:
             .options(joinedload(Conversation.user))
             .execution_options(populate_existing=True)
         )
+        if lock:
+            query = query.with_for_update(of=Conversation)
         if with_messages:
             query = query.options(selectinload(Conversation.messages))
         return (await self.session.execute(query)).scalar_one_or_none()
@@ -50,6 +52,14 @@ class ConversationRepository:
             .limit(limit)
         )
         return list(result.scalars()), total or 0
+
+    async def first_message(self, conversation_id: uuid.UUID) -> ConversationMessage | None:
+        return await self.session.scalar(
+            select(ConversationMessage)
+            .where(ConversationMessage.conversation_id == conversation_id)
+            .order_by(ConversationMessage.created_at, ConversationMessage.id)
+            .limit(1)
+        )
 
     async def recent_messages(
         self, conversation_id: uuid.UUID, limit: int

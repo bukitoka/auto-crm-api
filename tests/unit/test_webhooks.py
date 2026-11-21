@@ -92,7 +92,9 @@ def subscriptions(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
     repository = MagicMock()
     repository.return_value.list_active_for_event = AsyncMock(return_value=found)
     monkeypatch.setattr(delivery, "WebhookRepository", repository)
-    monkeypatch.setattr(delivery, "SessionFactory", MagicMock())  # async context manager
+    factory = MagicMock()
+    factory.return_value.__aenter__.return_value = MagicMock(commit=AsyncMock())
+    monkeypatch.setattr(delivery, "SessionFactory", factory)
     return found
 
 

@@ -56,9 +56,13 @@ class AIClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         temperature: float = 0.2,
+        json_reply: bool = False,
     ) -> ChatCompletionMessage:
         """One chat turn with function calling. The reply may contain `tool_calls` to run."""
-        response = await self._create(messages=messages, tools=tools, temperature=temperature)
+        options = {"response_format": {"type": "json_object"}} if json_reply else {}
+        response = await self._create(
+            messages=messages, tools=tools, temperature=temperature, **options
+        )
         return response.choices[0].message
 
     async def _create(self, **params: Any) -> ChatCompletion:

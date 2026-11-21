@@ -11,14 +11,18 @@ import hashlib
 import hmac
 import json
 import logging
+import uuid
 from typing import Any
 
 import httpx
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import SessionFactory
 from app.core.events import Event
-from app.modules.webhooks.models import WebhookSubscription
+from app.core.exceptions import ConflictError, NotFoundError
+from app.modules.webhooks.models import WebhookDelivery, WebhookSubscription
 from app.modules.webhooks.repository import WebhookRepository
 from app.shared.utils import utc_now
 
@@ -37,27 +41,76 @@ async def deliver_event(event: Event, data: dict[str, Any]) -> None:
     if not subscriptions:
         return
 
-    body = json.dumps(
-        {"event": event.value, "occurred_at": utc_now().isoformat(), "data": data}
-    ).encode()
+    payload = {"event": event.value, "occurred_at": utc_now().isoformat(), "data": data}
     async with httpx.AsyncClient(timeout=settings.webhook_timeout_seconds) as client:
-        await asyncio.gather(*(_send(client, sub, event, body) for sub in subscriptions))
+        await asyncio.gather(
+            *(_record_delivery(client, sub, event, payload) for sub in subscriptions)
+        )
 
 
-async def _send(
-    client: httpx.AsyncClient, subscription: WebhookSubscription, event: Event, body: bytes
+async def _record_delivery(
+    client: httpx.AsyncClient,
+    subscription: WebhookSubscription,
+    event: Event,
+    payload: dict[str, Any],
 ) -> None:
+    async with SessionFactory() as session:
+        item = WebhookDelivery(
+            id=uuid.uuid7(), subscription_id=subscription.id, event=event, payload=payload
+        )
+        session.add(item)
+        await session.commit()
+        await _attempt(client, subscription, item)
+        await session.commit()
+
+
+async def retry_delivery(session: AsyncSession, delivery_id: uuid.UUID) -> WebhookDelivery:
+    item = await session.scalar(
+        select(WebhookDelivery).where(WebhookDelivery.id == delivery_id).with_for_update()
+    )
+    if item is None:
+        raise NotFoundError("Delivery not found")
+    if item.delivered:
+        raise ConflictError("This delivery already succeeded")
+    if item.attempts == 0 and (utc_now() - item.created_at).total_seconds() < (
+        settings.webhook_timeout_seconds + 10
+    ):
+        raise ConflictError("This delivery is still in progress")
+    subscription = (
+        await session.get(WebhookSubscription, item.subscription_id)
+        if item.subscription_id
+        else None
+    )
+    if subscription is None or not subscription.is_active or subscription.event != item.event:
+        raise ConflictError("This event no longer has an active matching subscription")
+    async with httpx.AsyncClient(timeout=settings.webhook_timeout_seconds) as client:
+        await _attempt(client, subscription, item)
+    await session.commit()
+    await session.refresh(item)
+    return item
+
+
+async def _attempt(
+    client: httpx.AsyncClient, subscription: WebhookSubscription, item: WebhookDelivery
+) -> None:
+    body = json.dumps(item.payload, sort_keys=True).encode()
     headers = {
         "Content-Type": "application/json",
-        "X-AutoCRM-Event": event.value,
+        "X-AutoCRM-Event": str(item.event),
+        "X-AutoCRM-Delivery": str(item.id),
         "X-AutoCRM-Signature": sign_payload(subscription.secret, body),
     }
+    item.attempts = (item.attempts or 0) + 1
+    item.status_code = None
+    item.error = None
     try:
         response = await client.post(subscription.target_url, content=body, headers=headers)
+        item.status_code = response.status_code
         response.raise_for_status()
-        logger.info("Delivered %s to %s", event, subscription.target_url)
+        item.delivered = True
     except httpx.HTTPError as exc:
-        # Failures are logged only; they never affect the API request.
-        logger.warning(
-            "Webhook delivery of %s to %s failed: %s", event, subscription.target_url, exc
+        item.delivered = False
+        item.error = (
+            f"HTTP {item.status_code}" if item.status_code is not None else type(exc).__name__
         )
+        logger.warning("Webhook delivery of %s failed: %s", item.event, item.error)

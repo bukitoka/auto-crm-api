@@ -62,6 +62,11 @@ class Settings(BaseSettings):
 
     webhook_timeout_seconds: float = 10.0
 
+    google_sync_client_id: str = ""
+    google_sync_client_secret: str = ""
+    microsoft_sync_client_id: str = ""
+    microsoft_sync_client_secret: str = ""
+
     # Object storage for uploaded images: MinIO locally, Neon object storage in production.
     # The AWS_* names are what Neon shows in its console, so they work unchanged.
     # S3_ENDPOINT is `host:port` or a full URL (`https://...`).

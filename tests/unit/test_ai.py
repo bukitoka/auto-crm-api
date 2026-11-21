@@ -99,6 +99,15 @@ async def test_chat_sends_tools_and_returns_the_message() -> None:
     assert call["extra_body"] == {"thinking": {"type": "disabled"}}
 
 
+async def test_chat_can_request_structured_replies_with_tools() -> None:
+    client = _client_returning('{"reply":"Hi","title":"Greeting","summary":"Said hello."}')
+    tools = [{"type": "function", "function": {"name": "search_contacts"}}]
+    await client.chat(messages=[], tools=tools, json_reply=True)
+    call = client._client.chat.completions.create.call_args.kwargs
+    assert call["response_format"] == {"type": "json_object"}
+    assert call["tools"] == tools
+
+
 async def test_chat_maps_provider_errors_to_502() -> None:
     client = _client_returning(None)
     client._client.chat.completions.create.side_effect = openai.APIConnectionError(

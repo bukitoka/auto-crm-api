@@ -1,5 +1,6 @@
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.activities.models import Activity, ActivityType
@@ -10,8 +11,9 @@ from app.modules.contacts.models import Contact
 from app.modules.contacts.repository import ContactRepository
 from app.modules.contacts.schemas import ContactCreate
 from app.modules.contacts.service import ContactService
+from app.modules.integrations.models import LeadRouting
 from app.modules.integrations.schemas import LeadIntake
-from app.modules.users.models import User
+from app.modules.users.models import SERVICE_ACCOUNT_EMAIL, User
 
 
 class IntegrationService:
@@ -31,8 +33,9 @@ class IntegrationService:
         created = contact is None
 
         if contact is None:
+            owner_id = data.owner_id or await self._route_owner()
             company = await self._find_or_create_company(
-                data.company_name, owner_id=data.owner_id, user=user
+                data.company_name, owner_id=owner_id, user=user
             )
             contact = await self.contact_service.create(
                 ContactCreate(
@@ -42,7 +45,7 @@ class IntegrationService:
                     phone=data.phone,
                     source=data.source,
                     company_id=company.id if company else None,
-                    owner_id=data.owner_id,
+                    owner_id=owner_id,
                 ),
                 user=user,
             )
@@ -60,12 +63,39 @@ class IntegrationService:
 
         return await self.contact_service.get(contact.id), created
 
+    async def _route_owner(self) -> uuid.UUID | None:
+        routing = await self.session.get(LeadRouting, 1, with_for_update=True)
+        if not routing or not routing.enabled:
+            return None
+        owners = list(
+            await self.session.scalars(
+                select(User.id)
+                .where(
+                    User.is_active.is_(True),
+                    User.is_super_admin.is_(False),
+                    User.email != SERVICE_ACCOUNT_EMAIL,
+                )
+                .order_by(User.id)
+            )
+        )
+        if not owners:
+            return None
+        last = routing.last_owner_id
+        routed = (
+            owners[(owners.index(last) + 1) % len(owners)]
+            if last is not None and last in owners
+            else owners[0]
+        )
+        routing.last_owner_id = routed
+        return routed
+
     async def _find_or_create_company(
         self, name: str | None, *, owner_id: uuid.UUID | None, user: User
     ) -> Company | None:
         if not name:
             return None
-        company = await self.companies.get_by_name(name)
+        owner = owner_id or user.id
+        company = await self.companies.get_by_name(name, owner_id=owner)
         if company is None:
-            company = await self.companies.add(Company(name=name, owner_id=owner_id or user.id))
+            company = await self.companies.add(Company(name=name, owner_id=owner))
         return company

@@ -54,6 +54,12 @@ class ToolContext:
 
 READ_TOOLS = frozenset(
     {
+        "search_documents",
+        "read_document",
+        "list_calendar_events",
+        "get_calendar_event",
+        "list_calendar_deadlines",
+        "get_follow_ups",
         "search_contacts",
         "search_companies",
         "search_deals",
@@ -74,7 +80,9 @@ READ_TOOLS = frozenset(
 )
 
 
-SUPERVISOR_TOOLS = frozenset({"list_automations", "create_admin", "set_admin_active"})
+SUPERVISOR_TOOLS = frozenset(
+    {"list_automations", "create_admin", "set_admin_active", "get_automation_health"}
+)
 
 
 Handler = Callable[[ToolContext, Any], Awaitable[dict[str, Any]]]

@@ -24,6 +24,9 @@ work to n8n.
 | Ask the assistant | Saved conversations, file attachments, CRM actions, charts, and tables |
 | Use focused AI features | Lead scoring, timeline summaries, email drafts, and contact extraction |
 | Connect your workflows | Lead intake, signed webhook events for n8n, and email notifications |
+| Plan work | Calendar events with CRM record links, task and deal deadlines, and the Follow-up inbox |
+| Store important files | Owner-scoped document uploads and picture previews, signed downloads, and assistant text extraction |
+| Manage operations | Duplicate merge, optional round-robin lead routing, response targets, and webhook delivery history |
 | See the numbers | Pipeline summaries, monthly trends, overdue work, and team statistics |
 
 ## Run locally
@@ -155,3 +158,30 @@ weak secrets at startup and disables interactive API docs. Deploy versions use
 `YYYY.MM.DD.N` (date and run number); `/health` reports the version and commit.
 
 The `POST /api/v1/emails/notify` endpoint lets n8n send notifications through the same backend.
+
+## Workspace workflows
+
+Apply migrations to an existing database with `make migrate`. `make help` lists the local
+development and verification targets.
+
+- `/calendar/events` manages personal timed events and their optional contact, company, or deal link. `/calendar/deadlines` lists open task and deal dates.
+- `/documents` provides owner-scoped upload, metadata, signed download and picture preview, and deletion. The assistant can search and read files owned by the signed-in user.
+- `/dashboard/follow-ups` lists overdue tasks, deals without a scheduled next step, and leads awaiting first contact. `/duplicates` supports owner-scoped contact and company review and merge.
+- Super admins configure lead routing at `/integrations/lead-routing` and inspect or retry webhook deliveries under `/webhooks/deliveries`.
+- The assistant can read the calendar, schedule events, and draft meeting follow-through. The dedicated draft turn is read-only. Chat title and summary generation run independently of any external calendar provider.
+
+## Calendar and inbox import
+
+Set the Google or Microsoft sync client ID and secret in the API environment. Register
+`FRONTEND_URL/settings/sync/callback` as the OAuth web redirect URI. For Google, enable the
+Calendar and Gmail APIs and allow Calendar Events read-only and Gmail metadata access.
+For Microsoft, register a web application with delegated `User.Read`, `Calendars.Read`,
+and `Mail.ReadBasic` permissions. Admins start an import from **Settings → Calendar and email sync**.
+
+Each import reads up to 100 upcoming timed meetings over 31 days and 25 inbox messages from the
+last 30 days. Matching message metadata is logged on the admin's existing contacts. Meetings
+appear in Calendar and link to a matching attendee when available. The CRM tracks imported IDs
+to avoid duplicates. Provider tokens are used for that import and are never stored.
+
+- [Google OAuth web applications](https://developers.google.com/identity/protocols/oauth2/web-server)
+- [Microsoft authorization code flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow)

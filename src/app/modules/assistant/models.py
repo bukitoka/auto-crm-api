@@ -19,6 +19,8 @@ class Conversation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     title: Mapped[str] = mapped_column(String(200))
+    title_pending: Mapped[bool | None]
+    summary: Mapped[str | None] = mapped_column(Text)
     is_archived: Mapped[bool] = mapped_column(default=False, index=True)
     message_count: Mapped[int] = mapped_column(default=0)
     last_message_at: Mapped[datetime] = mapped_column(

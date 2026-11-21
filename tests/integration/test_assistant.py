@@ -1,5 +1,7 @@
 import json
+import uuid
 from collections.abc import Callable
+from datetime import timedelta
 from typing import Any, ClassVar
 
 import pytest
@@ -8,11 +10,15 @@ from openai.types.chat import ChatCompletionMessage, ChatCompletionMessageToolCa
 from openai.types.chat.chat_completion_message_tool_call import Function
 from pydantic import BaseModel
 
+from app.core.database import SessionFactory
 from app.core.exceptions import AIResponseError
 from app.main import app
 from app.modules.ai.dependencies import get_ai_client
 from app.modules.ai.schemas import EmailDraft, ExtractedContact, LeadScore, TimelineSummary
 from app.modules.assistant.agent import MAX_STEPS
+from app.modules.assistant.models import Conversation
+from app.modules.assistant.service import ChatMetadata
+from app.shared.utils import utc_now
 from tests.fakes import FakeMailer
 
 URL = "/api/v1/assistant/conversations"
@@ -51,6 +57,7 @@ class ScriptedAI:
     """Plays back model turns in order and records every request it received."""
 
     JSON_ANSWERS: ClassVar[dict[type, BaseModel]] = {
+        ChatMetadata: ChatMetadata(),
         LeadScore: LeadScore(score=77, reasoning="Engaged."),
         TimelineSummary: TimelineSummary(summary="Going well.", next_actions=["Call"]),
         EmailDraft: EmailDraft(subject="Hi", body="Hello Sam"),
@@ -89,6 +96,156 @@ async def start(client: AsyncClient, headers: dict[str, str], text: str = "Hi") 
     response = await client.post(URL, json=message(text), headers=headers)
     assert response.status_code == 201, response.text
     return response.json()
+
+
+async def test_ai_titles_and_summarizes_chat_without_overwriting_a_rename(
+    client: AsyncClient, admin_headers: dict[str, str], ai: ScriptedAI
+) -> None:
+    ai.script = [
+        says(json.dumps({"reply": "Sure.", "title": "Renewal prep", "summary": "Review renewal."})),
+        says(json.dumps({"reply": "Noted.", "title": "Other", "summary": "Call on Monday."})),
+    ]
+    turn = await start(client, admin_headers, "Help me prepare")
+    chat = turn["conversation"]
+    assert chat["title"] == "Renewal prep"
+    assert chat["summary"] == "Review renewal."
+    assert turn["messages"][1]["content"] == "Sure."
+    path = f"{URL}/{chat['id']}"
+    renamed = await client.patch(path, json={"title": "My title"}, headers=admin_headers)
+    assert renamed.status_code == 200
+    reply = await client.post(f"{path}/messages", json=message("Monday"), headers=admin_headers)
+    assert reply.status_code == 200
+    detail = (await client.get(path, headers=admin_headers)).json()
+    assert detail["title"] == "My title"
+    assert detail["summary"] == "Call on Monday."
+
+
+async def test_legacy_title_recovers_when_the_chat_continues(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    ai: ScriptedAI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = "Could you help me plan tomorrow's renewal calls?"
+    ai.script = [says("Sure.")]
+    chat = (await start(client, admin_headers, original))["conversation"]
+    assert chat["title"] == original
+    async with SessionFactory() as session:
+        stored = await session.get(Conversation, uuid.UUID(chat["id"]))
+        assert stored is not None
+        stored.title_pending = None
+        await session.commit()
+
+    monkeypatch.setitem(
+        ai.JSON_ANSWERS,
+        ChatMetadata,
+        ChatMetadata(title="Renewal call planning", summary="Plan calls for tomorrow."),
+    )
+    ai.script = [says("Here is the plan.")]
+    reply = await client.post(
+        f"{URL}/{chat['id']}/messages",
+        json=message("Please continue"),
+        headers=admin_headers,
+    )
+    assert reply.status_code == 200
+    updated = reply.json()["conversation"]
+    assert updated["title"] == "Renewal call planning"
+    assert updated["summary"] == "Plan calls for tomorrow."
+
+
+async def test_assistant_reads_owner_documents_and_keeps_meeting_draft_read_only(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    member_headers: dict[str, str],
+    ai: ScriptedAI,
+    monkeypatch: pytest.MonkeyPatch,
+    storage,
+) -> None:
+    from app.modules.assistant.tools import workspace
+
+    monkeypatch.setattr(workspace, "get_storage", lambda: storage)
+    doc = await client.post(
+        "/api/v1/documents",
+        files={"file": ("terms.txt", b"Terms for renewal", "text/plain")},
+        headers=admin_headers,
+    )
+    assert doc.status_code == 201
+    document_id = doc.json()["id"]
+    ai.script = [
+        calls(
+            ("search_documents", {"search": "terms"}),
+            ("read_document", {"document_id": document_id}),
+        ),
+        says("Renewal terms."),
+    ]
+    await start(client, admin_headers, "Summarize my document")
+    results = ai.tool_results()
+    assert results[0]["documents"][0]["id"] == document_id
+    assert results[1]["untrusted_file_text"] == "Terms for renewal"
+
+    ai.script = [calls(("read_document", {"document_id": document_id})), says("Unavailable.")]
+    await start(client, member_headers)
+    assert ai.tool_results() == [{"error": "Document not found"}]
+
+    ai.script = [calls(("create_task", {"title": "Do not write"})), says("Draft only.")]
+    result = await client.post(
+        URL,
+        json=message("Draft follow-up", {"type": "meeting", "id": document_id}),
+        headers=admin_headers,
+    )
+    assert result.status_code == 201
+    assert result.json()["messages"][1]["actions"] == []
+    assert ai.tool_results() == [{"error": "Meeting drafts cannot change records or send email"}]
+
+
+async def test_assistant_schedules_and_reads_a_personal_calendar_event(
+    client: AsyncClient, admin_headers: dict[str, str], ai: ScriptedAI
+) -> None:
+    starts = utc_now() + timedelta(days=1)
+    ends = starts + timedelta(hours=1)
+    ai.script = [
+        calls(
+            (
+                "create_calendar_event",
+                {
+                    "title": "Renewal meeting",
+                    "starts_at": starts.isoformat(),
+                    "ends_at": ends.isoformat(),
+                },
+            )
+        ),
+        says("Scheduled."),
+    ]
+    result = await start(client, admin_headers, "Schedule the renewal meeting tomorrow")
+    action = result["messages"][1]["actions"][0]
+    event_id = action["entity_id"]
+    assert action["entity"] == "calendar_event"
+
+    ai.script = [
+        calls(
+            ("get_calendar_event", {"event_id": event_id}),
+            (
+                "list_calendar_events",
+                {
+                    "start": (starts - timedelta(hours=1)).isoformat(),
+                    "end": (ends + timedelta(hours=1)).isoformat(),
+                },
+            ),
+            (
+                "list_calendar_deadlines",
+                {
+                    "start": starts.date().isoformat(),
+                    "end": (starts + timedelta(days=1)).date().isoformat(),
+                },
+            ),
+        ),
+        says("You have one meeting."),
+    ]
+    await start(client, admin_headers, "What is on my calendar?")
+    event, events, deadlines = ai.tool_results()
+    assert event["title"] == "Renewal meeting"
+    assert events["events"][0]["id"] == event_id
+    assert deadlines == {"deadlines": []}
 
 
 async def test_conversation_is_saved_and_continued(

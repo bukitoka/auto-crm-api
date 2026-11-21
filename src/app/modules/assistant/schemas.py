@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from app.modules.assistant.blocks import AssistantBlock
 from app.shared.schemas import ORMModel, UserRef
 
-EntityType = Literal["contact", "company", "deal", "task", "activity"]
+EntityType = Literal["contact", "company", "deal", "task", "activity", "calendar_event"]
 
 
 class AssistantAction(BaseModel):
@@ -24,6 +24,8 @@ class AssistantAction(BaseModel):
 
 class AssistantReply(BaseModel):
     reply: str
+    title: str | None = None
+    summary: str | None = None
     actions: list[AssistantAction]
     blocks: list[AssistantBlock] = []
 
@@ -31,7 +33,7 @@ class AssistantReply(BaseModel):
 class PageContext(BaseModel):
     """The record the user is looking at, so "this contact" / "this deal" work."""
 
-    type: Literal["contact", "company", "deal"]
+    type: Literal["contact", "company", "deal", "meeting"]
     id: uuid.UUID
 
 
@@ -94,6 +96,7 @@ class MessageRead(ORMModel):
 class ConversationRead(ORMModel):
     id: uuid.UUID
     title: str
+    summary: str | None = None
     is_archived: bool
     message_count: int
     last_message_at: datetime

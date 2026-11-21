@@ -4,16 +4,21 @@ from app.modules.activities.router import router as activities_router
 from app.modules.ai.router import router as ai_router
 from app.modules.assistant.router import router as assistant_router
 from app.modules.auth.router import router as auth_router
+from app.modules.calendar.router import router as calendar_router
+from app.modules.calendar.router import schedule_router
 from app.modules.companies.router import router as companies_router
 from app.modules.contacts.router import router as contacts_router
 from app.modules.dashboard.router import router as dashboard_router
 from app.modules.deals.router import router as deals_router
+from app.modules.documents.router import router as documents_router
+from app.modules.duplicates.router import router as duplicates_router
 from app.modules.emails.router import router as emails_router
 from app.modules.integrations.router import router as integrations_router
 from app.modules.pipeline.router import router as pipeline_router
 from app.modules.tasks.router import router as tasks_router
 from app.modules.users.router import router as users_router
 from app.modules.webhooks.router import router as webhooks_router
+from app.modules.workspace_sync.router import router as workspace_sync_router
 
 api_router = APIRouter()
 api_router.include_router(auth_router)
@@ -24,6 +29,11 @@ api_router.include_router(pipeline_router)
 api_router.include_router(deals_router)
 api_router.include_router(activities_router)
 api_router.include_router(tasks_router)
+api_router.include_router(calendar_router)
+api_router.include_router(schedule_router)
+api_router.include_router(documents_router)
+api_router.include_router(duplicates_router)
+api_router.include_router(workspace_sync_router)
 api_router.include_router(dashboard_router)
 api_router.include_router(ai_router)
 api_router.include_router(assistant_router)

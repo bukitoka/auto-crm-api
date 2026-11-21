@@ -70,8 +70,9 @@ TASK_COUNT = 30
 
 # The same tables the test suite cleans: everything except pipeline_stages and alembic_version.
 CRM_TABLES = (
-    "assistant_messages, assistant_conversations, activities, tasks, deals, contacts, "
-    "companies, webhook_subscriptions, users"
+    "assistant_messages, assistant_conversations, calendar_events, documents, activities, tasks, "
+    "deals, contacts, companies, webhook_deliveries, webhook_subscriptions, lead_routing, "
+    "workspace_sync_imports, users"
 )
 
 N8N_WEBHOOKS = [

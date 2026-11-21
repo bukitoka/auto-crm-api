@@ -14,3 +14,8 @@ class LeadIntake(BaseModel):
     message: str | None = Field(default=None, max_length=5000)
     owner_id: uuid.UUID | None = None  # the admin who should own the lead
     source: str = Field(default="web_form", max_length=50)
+
+
+class LeadRoutingSettings(BaseModel):
+    enabled: bool = False
+    response_hours: int = Field(default=24, ge=1, le=168)

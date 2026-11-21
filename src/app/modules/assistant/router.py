@@ -32,7 +32,7 @@ router = APIRouter(prefix="/assistant/conversations", tags=["assistant"])
 async def message_with_files(
     files: Annotated[list[UploadFile], File(description="Up to 3 files, 5 MB each")],
     content: Annotated[str, Form(max_length=4000)] = "",
-    context_type: Annotated[Literal["contact", "company", "deal"] | None, Form()] = None,
+    context_type: Annotated[Literal["contact", "company", "deal", "meeting"] | None, Form()] = None,
     context_id: Annotated[uuid.UUID | None, Form()] = None,
 ) -> MessageWithFiles:
     """A message with attached files. DeepSeek only reads text, so each file is converted to

@@ -19,6 +19,9 @@ class FakeStorage(Storage):
     async def put(self, key: str, data: bytes, content_type: str) -> None:
         self.files[key] = (data, content_type)
 
+    async def read(self, key: str, limit: int) -> bytes:
+        return self.files[key][0][:limit]
+
     async def delete(self, key: str) -> None:
         self.files.pop(key, None)
 

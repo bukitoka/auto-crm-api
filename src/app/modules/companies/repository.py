@@ -34,10 +34,11 @@ class CompanyRepository:
     async def exists(self, company_id: uuid.UUID) -> bool:
         return await self.session.get(Company, company_id) is not None
 
-    async def get_by_name(self, name: str) -> Company | None:
-        result = await self.session.execute(
-            select(Company).where(func.lower(Company.name) == name.lower()).limit(1)
-        )
+    async def get_by_name(self, name: str, *, owner_id: uuid.UUID | None = None) -> Company | None:
+        query = select(Company).where(func.lower(Company.name) == name.lower())
+        if owner_id is not None:
+            query = query.where(Company.owner_id == owner_id)
+        result = await self.session.execute(query.limit(1))
         return result.scalar_one_or_none()
 
     async def list_page(

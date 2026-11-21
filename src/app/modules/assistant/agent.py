@@ -6,9 +6,10 @@ Unexpected errors propagate to the request's error handling.
 """
 
 import json
+import re
 from typing import Any
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.email import BaseMailer
@@ -22,6 +23,12 @@ from app.shared.utils import today_utc
 
 # Model round-trips per user message; each may call several tools.
 MAX_STEPS = 8
+
+
+class ReplyContent(BaseModel):
+    reply: str
+    title: str | None = None
+    summary: str | None = None
 
 
 class AssistantAgent:
@@ -42,11 +49,24 @@ class AssistantAgent:
             *history,
         ]
 
+        draft_only = context is not None and context.type == "meeting"
+        specs = tool_specs_for(user, read_only=draft_only)
+        allowed_names = {spec["function"]["name"] for spec in specs}
         for _ in range(MAX_STEPS):
-            reply = await self.ai.chat(messages=messages, tools=tool_specs_for(user))
+            reply = await self.ai.chat(messages=messages, tools=specs, json_reply=True)
             if not reply.tool_calls:
+                content = (reply.content or "Done.").strip()
+                fenced = re.fullmatch(
+                    r"```(?:json)?\s*(.*?)\s*```", content, re.DOTALL | re.IGNORECASE
+                )
+                try:
+                    metadata = ReplyContent.model_validate_json(fenced[1] if fenced else content)
+                except ValidationError:
+                    return AssistantReply(reply=content, actions=ctx.actions, blocks=ctx.blocks)
                 return AssistantReply(
-                    reply=(reply.content or "Done.").strip(),
+                    reply=metadata.reply,
+                    title=metadata.title,
+                    summary=metadata.summary,
                     actions=ctx.actions,
                     blocks=ctx.blocks,
                 )
@@ -57,7 +77,10 @@ class AssistantAgent:
                 function = getattr(call, "function", None)
                 name = function.name if function else ""
                 arguments = function.arguments if function else "{}"
-                result = await self._run_tool(ctx, name, arguments)
+                if name not in allowed_names and draft_only:
+                    result = {"error": "Meeting drafts cannot change records or send email"}
+                else:
+                    result = await self._run_tool(ctx, name, arguments)
                 messages.append(
                     {"role": "tool", "tool_call_id": call.id, "content": _to_json(result)}
                 )
@@ -94,7 +117,7 @@ def _system_prompt(user: User, context: PageContext | None) -> str:
         today=today.isoformat(),
         weekday=today.strftime("%A"),
         context=context_line,
-    )
+    ) + prompts.REPLY_FORMAT
 
 
 def _to_json(data: dict[str, Any]) -> str:

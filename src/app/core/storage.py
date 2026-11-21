@@ -13,7 +13,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from typing import Annotated
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from fastapi import Depends
 from minio import Minio
@@ -83,6 +83,38 @@ class Storage:
         return self._signer.presigned_get_object(
             self.bucket, key, expires=_URL_LIFETIME, request_date=signed_at
         )
+
+    def download_url(self, key: str, filename: str, *, inline_type: str | None = None) -> str:
+        disposition = "inline" if inline_type else "attachment"
+        encoded_name = quote(filename, safe="")
+        headers = {
+            "response-content-disposition": f"{disposition}; filename*=UTF-8''{encoded_name}"
+        }
+        if inline_type:
+            headers["response-content-type"] = inline_type
+        return self._signer.presigned_get_object(
+            self.bucket,
+            key,
+            expires=timedelta(minutes=5),
+            response_headers=headers,
+        )
+
+    async def read(self, key: str, limit: int) -> bytes:
+        def get() -> bytes:
+            response = self._client.get_object(self.bucket, key)
+            try:
+                data = response.read(limit + 1)
+                if len(data) > limit:
+                    raise StorageError("Stored file exceeds its read limit")
+                return data
+            finally:
+                response.close()
+                response.release_conn()
+
+        try:
+            return await asyncio.to_thread(get)
+        except (MinioException, OSError) as exc:
+            raise StorageError() from exc
 
     def _put_sync(self, key: str, data: bytes, content_type: str) -> None:
         if self._create_bucket and not self._bucket_ready:
